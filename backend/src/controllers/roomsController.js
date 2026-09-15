@@ -246,7 +246,7 @@ export async function markRoomClean(req, res) {
         type: NotificationType.ROOM_CLEAN,
         title: `Room ${room.room_number} Clean`,
         message: `Room ${room.room_number} has been marked clean.`,
-        targetRoles: ['FRONT_DESK', 'MANAGER', 'ADMIN'],
+        targetRoles: ['receptionist', 'manager', 'admin'],
         priority: NotificationPriority.NORMAL,
         roomId: room.id,
         metadata: { roomNumber: room.room_number }
@@ -290,7 +290,7 @@ export async function markRoomDirty(req, res) {
         type: NotificationType.ROOM_DIRTY,
         title: `Room ${room.room_number} Marked Dirty`,
         message: `Room ${room.room_number} needs cleaning.`,
-        targetRoles: ['HOUSEKEEPING', 'MANAGER', 'ADMIN'],
+        targetRoles: ['housekeeping', 'manager', 'admin'],
         priority: NotificationPriority.HIGH,
         roomId: room.id,
         metadata: { roomNumber: room.room_number }

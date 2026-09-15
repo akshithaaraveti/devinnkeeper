@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { useStore } from "@/lib/store";
 import { apiClient } from "@/lib/api";
 import { useAuthContext, ROLE_NAMES } from "@/contexts/AuthContext";
@@ -21,8 +21,6 @@ import {
   Calendar,
   ChevronLeft,
   ChevronRight,
-  Bell,
-  BellOff,
   Sparkles,
   X,
   DoorOpen,
@@ -40,7 +38,6 @@ import MetricsDashboard from "@/components/dashboard/MetricsDashboard";
 import RoomStatusBoard from "@/components/dashboard/RoomStatusBoard";
 import TapeChart from "@/components/dashboard/TapeChart";
 import ArrivalsDepartures from "@/components/dashboard/ArrivalsDepartures";
-import NotificationCenter from "@/components/dashboard/NotificationCenter";
 import RoomDetailsDrawer from "@/components/dashboard/RoomDetailsDrawer";
 import Module5Widgets from "@/components/dashboard/Module5Widgets";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -64,23 +61,19 @@ export default function Dashboard() {
     tapeChartStartDate, setTapeChartStartDate,
     reservations, setReservations,
     guests, setGuests,
-    notifications, setNotifications,
-    unreadCount, setUnreadCount,
   } = useStore();
 
   const { theme } = useTheme();
-  const [showNotifications, setShowNotifications] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
   const [isLoading, setIsLoading] = useState(false);
 
   const fetchAll = useCallback(async (isInitial = false) => {
     if (isInitial) setIsLoading(true);
     try {
-      const [roomsResult, reservationsResult, guestsResult, notificationsResult] = await Promise.allSettled([
+      const [roomsResult, reservationsResult, guestsResult] = await Promise.allSettled([
         apiClient.rooms.list({ limit: 250 }),
         apiClient.reservations.list(),
         apiClient.guests.list(),
-        apiClient.notifications.list(),
       ]);
 
       if (roomsResult.status === "fulfilled") {
@@ -101,18 +94,12 @@ export default function Dashboard() {
         setGuests(guestsData as any);
       }
 
-      if (notificationsResult.status === "fulfilled") {
-        const notificationsResp = notificationsResult.value;
-        const notificationsData = notificationsResp?.data?.items ?? notificationsResp?.data ?? [];
-        setNotifications(notificationsData as any);
-        setUnreadCount((notificationsData as any[]).filter((n: any) => !n.isRead && !n.readAt).length || 0);
-      }
     } catch (e) {
       console.warn("Failed to fetch dashboard data", e);
     } finally {
       if (isInitial) setIsLoading(false);
     }
-  }, [setRooms, setReservations, setGuests, setNotifications, setUnreadCount]);
+  }, [setRooms, setReservations, setGuests]);
 
   useEffect(() => {
     fetchAll(true);
@@ -274,19 +261,6 @@ export default function Dashboard() {
               </>
             )}
 
-            <Button
-              variant="ghost"
-              size="icon"
-              className="relative rounded-2xl cursor-pointer"
-              onClick={() => setShowNotifications(!showNotifications)}
-            >
-              {unreadCount > 0 ? <Bell className="h-5 w-5" /> : <BellOff className="h-5 w-5" />}
-              {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground">
-                  {unreadCount > 9 ? "9+" : unreadCount}
-                </span>
-              )}
-            </Button>
           </div>
         </div>
       </motion.div>
@@ -318,20 +292,6 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       )}
-
-      {/* Notification Center */}
-      <AnimatePresence>
-        {showNotifications && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.2 }}
-          >
-            <NotificationCenter onClose={() => setShowNotifications(false)} />
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>

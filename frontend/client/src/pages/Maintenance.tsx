@@ -247,11 +247,6 @@ export default function MaintenancePage() {
       qc.invalidateQueries({ queryKey: ["maintenance"] });
       qc.invalidateQueries({ queryKey: ["rooms"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
-      apiClient.notifications.create({
-        type: "maintenance",
-        title: "Maintenance Issue Reported",
-        message: `New repair ticket created: ${variables.issue || 'Facility issue'}`,
-      }).then(() => qc.invalidateQueries({ queryKey: ["notifications"] })).catch(() => {});
       toast.success(t("maintenance.newTicket"));
       setDialogOpen(false);
       form.reset();
@@ -265,12 +260,6 @@ export default function MaintenancePage() {
       qc.invalidateQueries({ queryKey: ["maintenance"] });
       qc.invalidateQueries({ queryKey: ["rooms"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
-      const newStatus = (variables.data?.status || "updated").toUpperCase();
-      apiClient.notifications.create({
-        type: "maintenance",
-        title: "Maintenance Ticket Alert",
-        message: `Ticket #${variables.id} status updated to ${newStatus}`,
-      }).then(() => qc.invalidateQueries({ queryKey: ["notifications"] })).catch(() => {});
       toast.success(t("maintenance.toastTicketUpdated"));
     },
     onError: () => toast.error(t("maintenance.toastFailedUpdate")),
@@ -438,6 +427,8 @@ export default function MaintenancePage() {
                                   }
                                   qc.invalidateQueries({ queryKey: ["maintenance"] });
                                   toast.success(t("maintenance.toastRepairStarted"));
+                                }).catch((error: any) => {
+                                  toast.error(error?.response?.data?.error || t("housekeeping.toastFailedUpdate"));
                                 });
                               } else {
                                 setTimerCache(ticket.id, {

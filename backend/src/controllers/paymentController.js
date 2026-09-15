@@ -92,7 +92,7 @@ export async function createPayment(req, res) {
         type: isFailed ? NotificationType.PAYMENT_FAILED : NotificationType.PAYMENT_SUCCESS,
         title: isFailed ? `Payment Failed: $${payment.amount}` : `Payment Received: $${payment.amount}`,
         message: `Payment of $${payment.amount} (${payment.method}) status: ${payment.paymentStatus}`,
-        targetRoles: ['FRONT_DESK', 'MANAGER', 'ADMIN', 'ACCOUNTANT'],
+        targetRoles: ['receptionist', 'manager', 'admin', 'staff'],
         priority: isFailed ? NotificationPriority.HIGH : NotificationPriority.NORMAL,
         reservationId: payment.reservationId || null,
         metadata: { amount: payment.amount, method: payment.method, status: payment.paymentStatus }
@@ -120,6 +120,19 @@ export async function updatePayment(req, res) {
       }
     });
     res.json(payment);
+    try {
+      const status = String(payment.paymentStatus || '').toLowerCase();
+      await createNotification({
+        type: status === 'failed' ? NotificationType.PAYMENT_FAILED : NotificationType.PAYMENT_RECEIVED,
+        title: status === 'failed' ? 'Payment Failed' : 'Payment Updated',
+        message: `Payment of $${payment.amount} (${payment.method}) status: ${payment.paymentStatus}`,
+        priority: status === 'failed' ? NotificationPriority.HIGH : NotificationPriority.NORMAL,
+        reservationId: payment.reservationId || null,
+        metadata: { paymentId: payment.id, amount: payment.amount, method: payment.method, status: payment.paymentStatus },
+      });
+    } catch (notifErr) {
+      console.error('Payment update notification error:', notifErr.message);
+    }
   } catch (err) {
     res.status(500).json({ error: 'An internal error occurred while processing your request.' });
   }

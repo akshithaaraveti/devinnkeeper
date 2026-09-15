@@ -4,7 +4,6 @@ import { createPaymentOrderForReservation } from './razorpayController.js';
 import { prisma } from '../utils/db.js';
 import { createNotification, NotificationType, NotificationPriority } from '../utils/notificationService.js';
 import crypto from 'crypto';
-import { verifyDrivingLicenceWithGemini } from '../services/geminiVerificationService.js';
 import { verifyWithDeepFace } from '../services/deepfaceVerificationService.js';
 import { verifyCheckInAccessToken } from '../utils/checkinAccess.js';
 
@@ -189,7 +188,7 @@ export async function createBookingWithPayment(req, res) {
   }
 }
 
-// Step 1: Verify the Driving Licence document with Gemini and the guest's face with DeepFace.
+// Step 1: Verify that the face in the ID image matches the selfie with DeepFace.
 export async function verifyGuestId(req, res) {
   try {
     const { reservationId, guestId, dlImageUrl, selfieImageUrl } = req.body;
@@ -223,126 +222,75 @@ export async function verifyGuestId(req, res) {
       return res.status(403).json({ error: 'This check-in link is not valid for the selected reservation.' });
     }
 
-    let verification = null;
-    try {
-      verification = await verifyDrivingLicenceWithGemini({ imageData: dlImageUrl, guest: existingRes.guest });
-    } catch (verificationError) {
-      console.warn('Gemini verification unavailable, using fallback:', verificationError.message);
-      // Seamless biometric or local verification fallback
-      if (selfieImageUrl) {
-        const biometric = compareFacesServer(dlImageUrl, selfieImageUrl);
-        if (biometric.isMatch) {
-          verification = {
-            verified: true,
-            reason: 'Biometric images and facial features verified successfully.',
-            extracted: { readable: true, confidence: 'high' }
-          };
-        } else {
-          // If a demo license or test image is uploaded
-          const isDemo = typeof dlImageUrl === 'string' && (
-            dlImageUrl.includes('demo') ||
-            dlImageUrl.includes('Demo') ||
-            dlImageUrl.length < 50000 ||
-            (existingRes.guest && (existingRes.guest.firstName?.toLowerCase().includes('demo') || existingRes.guest.lastName?.toLowerCase().includes('demo')))
-          );
-          if (isDemo) {
-            verification = {
-              verified: true,
-              reason: 'Demonstration Driving Licence and live selfie verified successfully.',
-              extracted: { readable: true, confidence: 'high' }
-            };
-          } else {
-            return res.status(400).json({
-              success: false,
-              verificationStatus: 'REJECTED',
-              error: biometric.reason || 'Verification failed: Facial features do not match.',
-            });
-          }
-        }
-      } else {
-        verification = {
-          verified: true,
-          reason: 'Driving Licence image uploaded and verified.',
-          extracted: { readable: true, confidence: 'medium' }
-        };
-      }
+    if (typeof dlImageUrl !== 'string' || !dlImageUrl.trim()) {
+      return res.status(400).json({ error: 'An ID image is required for face verification.' });
+    }
+    if (typeof selfieImageUrl !== 'string' || !selfieImageUrl.trim()) {
+      return res.status(400).json({ error: 'A selfie image is required for face verification.' });
     }
 
-    if (!verification) {
-      verification = {
-        verified: true,
-        reason: 'Identity document verified successfully.',
-        extracted: { readable: true }
-      };
-    }
-
-    if (typeof dlImageUrl !== 'string') {
-      return res.status(400).json({ error: 'A Driving Licence image is required.' });
-    }
-
-    let faceVerification;
-    if (verification.verified) {
-      if (typeof selfieImageUrl !== 'string' || !selfieImageUrl.trim()) {
-        faceVerification = {
-          verified: false,
-          reason: 'A selfie image is required for face verification.'
-        };
-      } else {
-        try {
-          faceVerification = await verifyWithDeepFace({
-            idImageData: dlImageUrl,
-            selfieImageData: selfieImageUrl,
-          });
-        } catch {
-          faceVerification = {
-            verified: false,
-            reason: 'Face verification could not be completed.'
-          };
-        }
-      }
-    } else {
-      faceVerification = {
-        verified: false,
-        reason: 'Face verification was not attempted because the Driving Licence was not verified.'
-      };
-    }
-
-    const documentVerified = verification.verified === true;
-    const faceVerified = faceVerification.verified === true;
-    const overallVerified = documentVerified && faceVerified;
-    const reason = overallVerified
-      ? faceVerification.reason || verification.reason
-      : (!documentVerified ? verification.reason : faceVerification.reason);
-
-    const reservation = await prisma.reservation.update({
-      where: { id: Number(reservationId) },
-      data: {
-        dlImageUrl: dlImageUrl.slice(0, 5000),
-        selfieImageUrl: typeof selfieImageUrl === 'string' ? selfieImageUrl.slice(0, 5000) : null,
-        verificationStatus: overallVerified ? 'VERIFIED' : 'REJECTED',
-      },
-      include: { guest: true }
+    const faceVerification = await verifyWithDeepFace({
+      idImageData: dlImageUrl,
+      selfieImageData: selfieImageUrl,
     });
+    const faceVerified = faceVerification.verified === true;
+    const reason = faceVerification.reason || (faceVerified
+      ? 'Face match successful.'
+      : 'Face does not match the ID image.');
 
     const verificationResult = {
-      verified: overallVerified,
-      documentVerified,
+      verified: faceVerified,
       faceVerified,
       ...(typeof faceVerification.distance === 'number' ? { faceDistance: faceVerification.distance } : {}),
       ...(typeof faceVerification.threshold === 'number' ? { faceThreshold: faceVerification.threshold } : {}),
       ...(typeof faceVerification.model === 'string' ? { model: faceVerification.model } : {}),
-      reason: reason || 'Identity verification failed.',
+      reason,
     };
 
-    if (!overallVerified) {
+    if (!faceVerified) {
+      try {
+        await createNotification({
+          type: NotificationType.IDENTITY_VERIFICATION_FAILED,
+          title: 'Identity Verification Failed',
+          message: `Face identity verification failed for Reservation #${existingRes.id}: ${verificationResult.reason}`,
+          priority: NotificationPriority.HIGH,
+          guestId: existingRes.guestId,
+          reservationId: existingRes.id,
+          roomId: existingRes.roomId,
+          metadata: { reservationId: existingRes.id, roomId: existingRes.roomId },
+        });
+      } catch (notifErr) {
+        console.error('[checkinController] IDENTITY_VERIFICATION_FAILED notification failed:', notifErr.message);
+      }
       return res.status(400).json({
         success: false,
         message: verificationResult.reason,
         verificationStatus: 'REJECTED',
         verification: verificationResult,
-        reservation
+        reservation: existingRes,
       });
     }
+
+    const reservation = await prisma.reservation.update({
+      where: { id: Number(reservationId) },
+      data: {
+        dlImageUrl: dlImageUrl.slice(0, 5000),
+        selfieImageUrl: selfieImageUrl.slice(0, 5000),
+        verificationStatus: 'VERIFIED',
+      },
+      include: { guest: true }
+    });
+
+    await createNotification({
+      type: NotificationType.IDENTITY_VERIFIED,
+      title: 'Identity Verification Completed',
+      message: `Face identity verification completed for Reservation #${reservation.id}.`,
+      priority: NotificationPriority.NORMAL,
+      guestId: reservation.guestId,
+      reservationId: reservation.id,
+      roomId: reservation.roomId,
+      metadata: { reservationId: reservation.id, roomId: reservation.roomId },
+    });
 
     res.json({
       success: true,
@@ -446,6 +394,20 @@ export async function processManualCheckInPayment(req, res) {
         notes: `Manual payment (${method}) collected at front desk for ${gName} (Reservation #${reservation.id})`,
       }
     });
+
+    try {
+      await createNotification({
+        type: NotificationType.PAYMENT_RECEIVED,
+        title: 'Payment Received',
+        message: `Payment of ₹${amount} recorded via ${method} for Reservation #${reservation.id}.`,
+        priority: NotificationPriority.NORMAL,
+        reservationId: reservation.id,
+        guestId: reservation.guestId,
+        metadata: { paymentId: payment.id, amount, method, status: payment.paymentStatus },
+      });
+    } catch (notifErr) {
+      console.error('[checkinController] PAYMENT_RECEIVED notification failed:', notifErr.message);
+    }
 
     res.json({
       success: true,
@@ -580,6 +542,17 @@ export async function completeGuestCheckIn(req, res) {
       include: { guest: true }
     });
 
+    await createNotification({
+      type: NotificationType.DIGITAL_KEY_GENERATED,
+      title: 'Digital Key Generated',
+      message: `Digital access credential generated for Reservation #${updated.id}.`,
+      priority: NotificationPriority.NORMAL,
+      guestId: updated.guestId,
+      reservationId: updated.id,
+      roomId: updated.roomId,
+      metadata: { reservationId: updated.id, roomId: updated.roomId },
+    });
+
     // 2. Update room status to occupied
     if (reservation.roomId) {
       try {
@@ -656,6 +629,21 @@ export async function generateDigitalLockKey(req, res) {
       },
       include: { guest: true }
     });
+
+    try {
+      await createNotification({
+        type: NotificationType.DIGITAL_KEY_GENERATED,
+        title: 'Digital Key Generated',
+        message: `Digital access credential generated for Reservation #${updated.id}.`,
+        priority: NotificationPriority.NORMAL,
+        guestId: updated.guestId,
+        reservationId: updated.id,
+        roomId: updated.roomId,
+        metadata: { reservationId: updated.id, roomId: updated.roomId },
+      });
+    } catch (notifErr) {
+      console.error('[checkinController] DIGITAL_KEY_GENERATED notification failed:', notifErr.message);
+    }
 
     return res.json({
       success: true,

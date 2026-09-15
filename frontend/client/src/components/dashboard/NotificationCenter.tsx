@@ -66,26 +66,19 @@ export default function NotificationCenter({ onClose }: NotificationCenterProps)
       );
       setUnreadCount(Math.max(0, unreadCount - 1));
     } catch {
-      setNotifications(
-        notifications.map((n) => (n.id === notificationId ? { ...n, isRead: true } : n))
-      );
-      setUnreadCount(Math.max(0, unreadCount - 1));
+      toast.error("Unable to mark notification as read");
     }
   };
 
   const handleMarkAllRead = async () => {
     setIsSubmitting(true);
     try {
-      await Promise.all(
-        notifications.filter((n) => !n.isRead).map((n) => apiClient.notifications.markRead(String(n.id)))
-      );
+      await apiClient.notifications.markAllRead();
       setNotifications(notifications.map((n) => ({ ...n, isRead: true })));
       setUnreadCount(0);
       toast.success("All notifications marked as read");
     } catch {
-      setNotifications(notifications.map((n) => ({ ...n, isRead: true })));
-      setUnreadCount(0);
-      toast.success("All notifications marked as read");
+      toast.error("Unable to mark all notifications as read");
     } finally {
       setIsSubmitting(false);
     }

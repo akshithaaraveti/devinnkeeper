@@ -51,6 +51,15 @@ const getRoomUnavailabilityReason = (room: any): string | null => {
   return null;
 };
 
+function splitPhoneForForm(phone: unknown) {
+  const value = String(phone || "").trim();
+  const country = COUNTRY_CODES.find((candidate) => value.startsWith(candidate.dialCode)) || COUNTRY_CODES[0];
+  const localNumber = value.startsWith(country.dialCode)
+    ? value.slice(country.dialCode.length).replace(/\D/g, "")
+    : value.replace(/\D/g, "");
+  return { country, localNumber: localNumber.slice(0, country.digitsLength) };
+}
+
 
 import { DataTablePagination } from "@/components/ui/DataTablePagination";
 
@@ -127,6 +136,7 @@ export default function ReservationsPage() {
     if (!dialogOpen) {
       form.reset();
       setEditing(null);
+      setSelectedCountry(COUNTRY_CODES[0]);
     }
   }, [dialogOpen]);
 
@@ -179,6 +189,7 @@ export default function ReservationsPage() {
       qc.invalidateQueries({ queryKey: ["dashboard"] });
       toast.success(vars.status === "checked_in" ? "Guest checked in!" : "Guest checked out!");
     },
+    onError: (e: any) => toast.error(e?.response?.data?.error || "Failed to update reservation status"),
   });
 
   const handleCancelSubmit = async () => {
@@ -249,13 +260,16 @@ if (emailVal.trim() && !emailRegex.test(emailVal.trim())) {
   return;
 }
 
+    const normalizedPhone = phoneVal.trim();
+    const payloadPhone = normalizedPhone
+      ? (normalizedPhone.startsWith("+") ? normalizedPhone : `${selectedCountry.dialCode}${normalizedPhone}`)
+      : "";
+
     const payload: any = {
       firstName: fn,
       lastName: ln,
       email: emailVal,
-      phone: phoneVal
-  ? `${selectedCountry.dialCode}${phoneVal.trim()}`
-  : "",
+        phone: payloadPhone,
       roomId: values.roomId || form.getValues("roomId") ? Number(values.roomId || form.getValues("roomId")) : null,
       checkIn: ci,
       checkOut: co,
@@ -309,7 +323,7 @@ if (emailVal.trim() && !emailRegex.test(emailVal.trim())) {
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">{t("reservations.title")}</h1>
           <p className="text-xs sm:text-sm text-muted-foreground">{t("reservations.subtitle")}</p>
         </div>
-        <Button onClick={() => { setEditing(null); form.reset(); setDialogOpen(true); }} className="gap-2 cursor-pointer w-full sm:w-auto">
+        <Button onClick={() => { setEditing(null); form.reset(); setSelectedCountry(COUNTRY_CODES[0]); setDialogOpen(true); }} className="gap-2 cursor-pointer w-full sm:w-auto">
           <Plus className="h-4 w-4" /> {t("reservations.newReservation")}
         </Button>
       </div>
@@ -396,13 +410,14 @@ if (emailVal.trim() && !emailRegex.test(emailVal.trim())) {
                                 (rm: any) => String(rm.id) === String(r.roomId) || String(rm.number) === String(r.roomId) || String(rm.room_number) === String(r.roomId)
                               );
                               const effectiveRoomId = matchedRoom ? String(matchedRoom.id) : (r.roomId ? String(r.roomId) : "");
+                              const phoneParts = splitPhoneForForm(r.guest?.phone);
 
                               form.reset({
                                 guestId: r.guestId ? String(r.guestId) : "",
                                 firstName: r.guest?.firstName || "",
                                 lastName: r.guest?.lastName || "",
                                 email: r.guest?.email || "",
-                                phone: r.guest?.phone || "",
+                                phone: phoneParts.localNumber,
                                 roomId: effectiveRoomId,
                                 checkIn: r.checkIn ? new Date(r.checkIn).toISOString().split("T")[0] : "",
                                 checkOut: r.checkOut ? new Date(r.checkOut).toISOString().split("T")[0] : "",
@@ -412,6 +427,7 @@ if (emailVal.trim() && !emailRegex.test(emailVal.trim())) {
                                 source: r.source ?? "Direct",
                                 notes: r.notes ?? "",
                               });
+                              setSelectedCountry(phoneParts.country);
                               setDialogOpen(true);
                             }}>
                             <Edit className="h-3.5 w-3.5" />
@@ -511,7 +527,10 @@ if (emailVal.trim() && !emailRegex.test(emailVal.trim())) {
                 }
                 const selectedRoom = (roomsQ.data ?? []).find((r: any) => String(r.id) === String(values.roomId));
                 const reason = getRoomUnavailabilityReason(selectedRoom);
-                if (reason) {
+                const isCurrentAssignedRoom = Boolean(
+                  editing && selectedRoom && String(editing.roomId) === String(selectedRoom.id)
+                );
+                if (reason && !isCurrentAssignedRoom) {
                   const roomNum = selectedRoom?.number || selectedRoom?.room_number || values.roomId;
                   toast.error(`Validation Error: Room ${roomNum} is ${reason} and cannot be reserved for a new booking.`);
                   return;

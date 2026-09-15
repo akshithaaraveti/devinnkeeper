@@ -1,14 +1,14 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Drawer,
-  DrawerContent,
-  DrawerHeader,
-  DrawerTitle,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerClose,
-} from "@/components/ui/drawer";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
@@ -137,13 +137,13 @@ export default function RoomDetailsDrawer({ isOpen, onClose, room, guest, reserv
         notes: `Direct room booking from Dashboard Drawer`,
       });
 
-      updateRoomStatus(room.id, "occupied");
+      updateRoomStatus(room.id, "reserved");
       qc.invalidateQueries({ queryKey: ["rooms"] });
       qc.invalidateQueries({ queryKey: ["reservations"] });
       qc.invalidateQueries({ queryKey: ["guests"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
 
-      toast.success(`Room ${room.number} booked successfully!`);
+      toast.success("Reservation created successfully");
       onClose();
     } catch (err: any) {
       toast.error(err?.response?.data?.error || "Failed to book room");
@@ -166,25 +166,31 @@ export default function RoomDetailsDrawer({ isOpen, onClose, room, guest, reserv
   ];
 
   return (
-    <Drawer open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DrawerContent className="max-h-[92vh] max-w-4xl mx-auto rounded-t-3xl border-x border-t border-border/80 shadow-2xl bg-card">
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent
+        showCloseButton={false}
+        className="max-w-4xl max-h-[min(90dvh,760px)] overflow-hidden rounded-3xl border-[#B89572]/40 bg-[#fffaf0] p-0 shadow-2xl"
+        onPointerDownOutside={(event) => {
+          if (activeStep === "BOOKING") event.preventDefault();
+        }}
+      >
         <div className="max-w-4xl w-full mx-auto flex flex-col h-full overflow-hidden">
           {/* Header */}
-          <DrawerHeader className="pb-3 px-4 sm:px-6">
+          <DialogHeader className="pb-3 px-4 pt-5 sm:px-6 sm:pt-6">
             <div className="flex items-start sm:items-center justify-between gap-3">
               <div className="min-w-0">
-                <DrawerTitle className="text-xl sm:text-2xl font-black flex items-center gap-2 text-foreground tracking-tight">
+                <DialogTitle className="text-xl sm:text-2xl font-black flex items-center gap-2 text-[#4a3022] tracking-tight">
                   {t("roomDrawer.roomNumber", { number: room?.number })}
-                </DrawerTitle>
-                <DrawerDescription className="text-xs sm:text-sm text-muted-foreground font-medium mt-0.5">
+                </DialogTitle>
+                <DialogDescription className="text-xs sm:text-sm text-[#80644d] font-medium mt-0.5">
                   {room?.type ? room.type.charAt(0).toUpperCase() + room.type.slice(1) : "Standard"} · {t("dashboard.floor", { floor: room?.floor })}
-                </DrawerDescription>
+                </DialogDescription>
               </div>
-              <DrawerClose asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full shrink-0">
+              <DialogClose asChild>
+                <Button variant="ghost" size="icon" aria-label="Close room details" className="h-8 w-8 rounded-full shrink-0 text-[#6f4b36] hover:bg-[#ead9c2]">
                   <X className="h-4 w-4" />
                 </Button>
-              </DrawerClose>
+              </DialogClose>
             </div>
 
             {room && (
@@ -205,15 +211,15 @@ export default function RoomDetailsDrawer({ isOpen, onClose, room, guest, reserv
                 )}
               </div>
             )}
-          </DrawerHeader>
+          </DialogHeader>
 
           <Separator />
 
           {/* Scrollable Body: Responsive 2-column grid */}
-          <ScrollArea className="flex-1 px-4 sm:px-6 py-4">
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 items-start">
+          <ScrollArea className="flex-1 min-h-0 px-4 py-4 sm:px-6">
+            <div className={`grid grid-cols-1 ${activeStep === "BOOKING" ? "lg:grid-cols-1" : "lg:grid-cols-12"} gap-5 sm:gap-6 items-start`}>
               {/* Left Column (5 cols): Photo & Status Notice */}
-              <div className="lg:col-span-5 space-y-4">
+              <div className={`${activeStep === "BOOKING" ? "hidden" : "lg:col-span-5"} space-y-4`}>
                 {(room?.image || (room?.type && (
                   String(room.type).toLowerCase().includes("deluxe") ||
                   String(room.type).toLowerCase().includes("family") ||
@@ -311,7 +317,7 @@ export default function RoomDetailsDrawer({ isOpen, onClose, room, guest, reserv
               </div>
 
               {/* Right Column (7 cols): Specs & Booking form */}
-              <div className="lg:col-span-7 space-y-4">
+              <div className={activeStep === "BOOKING" ? "lg:col-span-1 space-y-4" : "lg:col-span-7 space-y-4"}>
                 {/* Ready to Book Banner in Right Column */}
                 {isReadyToBook && activeStep === "IDLE" && (
                   <div className="p-4 rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-transparent flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
@@ -359,11 +365,11 @@ export default function RoomDetailsDrawer({ isOpen, onClose, room, guest, reserv
                 {/* BOOKING FORM VIEW */}
                 {activeStep === "BOOKING" && isReadyToBook ? (
                   <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-                    <div className="flex items-center justify-between rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 p-3.5">
-                      <div className="flex items-center gap-2 text-sky-800 dark:text-sky-300 text-sm font-bold">
-                        <Calendar className="h-5 w-5 text-sky-600 dark:text-sky-400" /> {t("roomDrawer.bookRoomTitle", { number: room?.number })}
+                    <div className="flex items-center justify-between rounded-xl bg-[#f3ede4] border border-[#B89572]/40 p-3.5">
+                      <div className="flex items-center gap-2 text-[#6f4b36] text-sm font-bold">
+                        <Calendar className="h-5 w-5 text-[#8B6748]" /> {t("roomDrawer.bookRoomTitle", { number: room?.number })}
                       </div>
-                      <Badge variant="outline" className="bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 font-semibold text-xs">{t("roomDrawer.directReservation")}</Badge>
+                      <Badge variant="outline" className="bg-[#fffaf0] text-[#6f4b36] border-[#B89572]/50 font-semibold text-xs">{t("roomDrawer.directReservation")}</Badge>
                     </div>
 
                     <div className="space-y-3.5">
@@ -428,7 +434,7 @@ export default function RoomDetailsDrawer({ isOpen, onClose, room, guest, reserv
                         </div>
                         <div className="flex justify-between text-foreground font-bold border-t border-border pt-1.5 mt-1">
                           <span>{t("roomDrawer.totalCharges")}</span>
-                          <span className="text-base font-extrabold text-primary">₹{(room?.rate || 0) * (parseInt(nights, 10) || 1)}</span>
+                          <span className="text-base font-extrabold text-[#8B6748]">₹{(room?.rate || 0) * (parseInt(nights, 10) || 1)}</span>
                         </div>
                       </div>
 
@@ -513,7 +519,7 @@ export default function RoomDetailsDrawer({ isOpen, onClose, room, guest, reserv
           <Separator />
 
           {/* Footer */}
-          <DrawerFooter className="pt-3 pb-4 px-4 sm:px-6">
+          <DialogFooter className="border-t border-[#B89572]/30 bg-[#f3ede4]/60 pt-3 pb-4 px-4 sm:px-6">
             {activeStep === "IDLE" ? (
               <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2.5 sm:gap-3 w-full">
                 <Button variant="outline" onClick={onClose} className="w-full sm:w-auto px-5 rounded-xl font-semibold cursor-pointer">
@@ -555,13 +561,6 @@ export default function RoomDetailsDrawer({ isOpen, onClose, room, guest, reserv
                               status: "pending",
                               assignedTo: "Maria Rodriguez",
                               notes: "Guest Checked Out - Express Checkout",
-                            }).catch(() => {});
-
-                            // Emit live notification
-                            await apiClient.notifications.create({
-                              type: "housekeeping",
-                              title: "Guest Checked Out",
-                              message: `Room #${room.number} checked out. Room added to Housekeeping list for turnaround cleaning.`,
                             }).catch(() => {});
 
                             updateRoomStatus(room.id, "dirty");
@@ -609,9 +608,9 @@ export default function RoomDetailsDrawer({ isOpen, onClose, room, guest, reserv
                 {t("roomDrawer.cancelReturn", "Back to Room Details")}
               </Button>
             )}
-          </DrawerFooter>
+          </DialogFooter>
         </div>
-      </DrawerContent>
-    </Drawer>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -195,7 +195,7 @@ export default function CheckInVerification() {
       }
     } catch (err) {
       setSendingReminder(false);
-      toast.success(`3-Hour prior check-in reminder notification dispatched to guest!`);
+      toast.error((err as any)?.response?.data?.error || "Failed to send the 3-hour prior check-in reminder.");
     }
   };
   const [isBookingModalOpen, setIsBookingModalOpen] = useState<boolean>(false);
@@ -333,22 +333,45 @@ export default function CheckInVerification() {
 
     if (isSelectedGuestCheckedIn) {
       setStep(3);
-      if (selectedReservation.digitalPin && selectedReservation.lockId) {
-        const details = {
-          digitalPin: selectedReservation.digitalPin,
-          lockId: selectedReservation.lockId,
-        };
-        setKeyDetails(details);
-        setDigitalKeyGenerated(true);
-        setCheckInCompletedAnimation(true);
-        sessionStorage.setItem("digitalKeyData", JSON.stringify({
-          reservation: selectedReservation,
-          keyDetails: details,
-        }));
-      } else {
-        setCheckInCompletedAnimation(true);
-        setDigitalKeyGenerated(false);
-      }
+      setCheckInCompletedAnimation(true);
+
+      let cancelled = false;
+      const restoreDigitalKey = async () => {
+        if (!selectedReservation.digitalPin || !selectedReservation.lockId) {
+          setDigitalKeyGenerated(false);
+          return;
+        }
+
+        try {
+          const response = await api.post("/checkin/generate-lock-key", {
+            reservationId: selectedReservation.id,
+          });
+          const data = response.data;
+          if (!cancelled && data.success && data.qrPayload) {
+            const details = {
+              digitalPin: data.digitalPin,
+              lockId: data.lockId,
+              qrPayload: data.qrPayload,
+            };
+            setKeyDetails(details);
+            setDigitalKeyGenerated(true);
+            sessionStorage.setItem("digitalKeyData", JSON.stringify({
+              reservation: data.reservation || selectedReservation,
+              keyDetails: details,
+            }));
+          }
+        } catch (err) {
+          if (!cancelled) {
+            setDigitalKeyGenerated(false);
+            toast.error((err as any)?.response?.data?.error || "Unable to load the digital key.");
+          }
+        }
+      };
+
+      restoreDigitalKey();
+      return () => {
+        cancelled = true;
+      };
     } else if (selectedReservation?.verificationStatus === 'VERIFIED' && hasPaid) {
       setStep(3);
     } else if (selectedReservation?.verificationStatus === 'VERIFIED') {
@@ -575,14 +598,22 @@ export default function CheckInVerification() {
 
       const data = res.data;
       setVerifying(false);
+      const backendVerification = data.verification || {};
+      const faceVerified = backendVerification.faceVerified === true;
+      const overallVerified = data.success === true && backendVerification.verified === true && faceVerified;
+      const verificationMessage = backendVerification.reason || data.error || data.message || "Face identity verification failed.";
+      const result = {
+        verificationStatus: overallVerified ? "VERIFIED" : "REJECTED",
+        faceVerified,
+        faceDistance: backendVerification.faceDistance,
+        faceThreshold: backendVerification.faceThreshold,
+        model: backendVerification.model,
+        message: verificationMessage,
+      };
 
-      if (data.success) {
-        setVerificationResult({
-          matchScore: data.matchScore || "92%",
-          verificationStatus: data.verificationStatus || "VERIFIED",
-          message: data.message || "Identity Verification Successful! Driver License and Selfie facial features matched.",
-        });
-        toast.success(data.message || "ID Verification Successful! Proceeding to Step 2...");
+      if (overallVerified) {
+        setVerificationResult(result);
+        toast.success(verificationMessage || "Identity verification successful. Proceeding to Step 2...");
         qc.invalidateQueries({ queryKey: ["reservations"] });
         qc.invalidateQueries({ queryKey: ["guests"] });
         qc.invalidateQueries({ queryKey: ["payments"] });
@@ -591,30 +622,31 @@ export default function CheckInVerification() {
         fetchReservations(targetResId);
         setStep(2); // Automatically advance directly to Step 2 (Payment Process)
       } else {
-        setVerificationResult({
-          matchScore: data.matchScore || "45%",
-          verificationStatus: "REJECTED",
-          message: data.error || data.message || "Verification Failed! Driver License and Selfie facial features do not match.",
-        });
-        toast.error(data.error || data.message || "Identity verification failed!");
+        setVerificationResult(result);
+        toast.error(verificationMessage);
       }
     } catch (err: any) {
       setVerifying(false);
       const data = err?.response?.data;
       if (data) {
+        const backendVerification = data.verification || {};
+        const verificationMessage = backendVerification.reason || data.error || data.message || "Face identity verification failed.";
         setVerificationResult({
-          matchScore: data.matchScore || "45%",
           verificationStatus: "REJECTED",
-          message: data.error || data.message || "Verification Failed! Driver License and Selfie facial features do not match.",
+          faceVerified: backendVerification.faceVerified === true,
+          faceDistance: backendVerification.faceDistance,
+          faceThreshold: backendVerification.faceThreshold,
+          model: backendVerification.model,
+          message: verificationMessage,
         });
-        toast.error(data.error || data.message || "Identity verification failed!");
+        toast.error(verificationMessage);
       } else {
         setVerificationResult({
-          matchScore: "40%",
           verificationStatus: "REJECTED",
-          message: err.message || "Verification network error.",
+          faceVerified: false,
+          message: err.message || "Face verification service is unavailable. Please try again.",
         });
-        toast.error("Network error during verification.");
+        toast.error(err.message || "Face verification service is unavailable. Please try again.");
       }
     }
   };
@@ -791,7 +823,10 @@ export default function CheckInVerification() {
       const anchor = document.createElement("a");
       anchor.href = url;
       anchor.download = `InnKeeper_CheckIn_Details_RES-${selectedReservation.id}.html`;
+      anchor.style.display = "none";
+      document.body.appendChild(anchor);
       anchor.click();
+      anchor.remove();
       URL.revokeObjectURL(url);
       toast.success("Check-in details downloaded.");
     } catch {
@@ -1058,7 +1093,7 @@ export default function CheckInVerification() {
                   <>
                     {selectedReservation && selectedReservation.verificationStatus === 'REJECTED' && (
                       <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs font-bold flex items-center justify-between">
-                        <span>✕ Driving Licence verification failed. Please upload a clear, valid licence that matches the reservation guest.</span>
+                        <span>✕ Face identity verification failed. Please upload a clearer ID image and selfie.</span>
                       </div>
                     )}
 
@@ -1173,6 +1208,10 @@ export default function CheckInVerification() {
                           <p className="text-xs mt-0.5 opacity-90">
                             {verificationResult.message}
                           </p>
+                          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-semibold mt-2">
+                            <span>Face Match: {verificationResult.faceVerified ? "Verified" : "Not verified"}</span>
+                            {verificationResult.model && <span>Model: {verificationResult.model}</span>}
+                          </div>
                           {verificationResult.verificationStatus !== "VERIFIED" && (
                             <p className="text-xs font-semibold mt-1.5 text-rose-600 dark:text-rose-400">
                               {t("checkin.verifyFailedRetry")}

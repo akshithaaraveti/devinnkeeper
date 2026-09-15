@@ -24,6 +24,7 @@ interface NotificationContextType {
   notifications: AppNotification[];
   unreadCount: number;
   loading: boolean;
+  error: string | null;
   isConnected: boolean;
   fetchNotifications: (page?: number, limit?: number) => Promise<void>;
   fetchUnreadCount: () => Promise<void>;
@@ -39,6 +40,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState<boolean>(false);
 
   const fetchUnreadCount = useCallback(async () => {
@@ -48,6 +50,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       setUnreadCount(res.data.count || 0);
     } catch (e) {
       console.error('Failed to fetch unread count:', e);
+      setError('Unable to load notification count.');
     }
   }, [user]);
 
@@ -58,16 +61,14 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       const res = await apiClient.notifications.list({ page, limit });
       const items = res.data?.items || res.data?.notifications || (Array.isArray(res.data) ? res.data : []);
       setNotifications(items);
-      const unread = items.filter((n: AppNotification) => !n.isRead && !n.readAt).length;
-      if (unreadCount === 0 && unread > 0) {
-        setUnreadCount(unread);
-      }
+      setError(null);
     } catch (e) {
       console.error('Failed to fetch notifications:', e);
+      setError('Unable to load notifications.');
     } finally {
       setLoading(false);
     }
-  }, [user, unreadCount]);
+  }, [user]);
 
   const playNotificationSound = () => {
     try {
@@ -101,7 +102,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       if (prev.some(n => n.id === notif.id)) return prev;
       return [notif, ...prev];
     });
-    setUnreadCount(prev => prev + 1);
+    if (!notif.isRead) setUnreadCount(prev => prev + 1);
   }, []);
 
   useEffect(() => {
@@ -160,9 +161,10 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       setNotifications(prev =>
         prev.map(n => (n.id === id ? { ...n, isRead: true, readAt: new Date().toISOString() } : n))
       );
-      setUnreadCount(prev => Math.max(0, prev - 1));
+      await fetchUnreadCount();
     } catch (e) {
       console.error('Failed to mark notification read:', e);
+      toast.error('Unable to mark notification as read');
     }
   };
 
@@ -170,10 +172,11 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     try {
       await apiClient.notifications.markAllRead();
       setNotifications(prev => prev.map(n => ({ ...n, isRead: true, readAt: new Date().toISOString() })));
-      setUnreadCount(0);
+      await fetchUnreadCount();
       toast.success('All notifications marked as read');
     } catch (e) {
       console.error('Failed to mark all as read:', e);
+      toast.error('Unable to mark all notifications as read');
     }
   };
 
@@ -190,6 +193,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       toast.success('Notification removed');
     } catch (e) {
       console.error('Failed to delete notification:', e);
+      toast.error('Unable to remove notification');
     }
   };
 
@@ -199,6 +203,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         notifications,
         unreadCount,
         loading,
+        error,
         isConnected,
         fetchNotifications,
         fetchUnreadCount,

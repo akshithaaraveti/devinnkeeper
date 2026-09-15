@@ -3,9 +3,19 @@ from deepface import DeepFace
 import cv2
 import os
 import tempfile
-import traceback
 
 app = Flask(__name__)
+
+
+def require_single_face(image_path, label):
+    faces = DeepFace.extract_faces(
+        img_path=image_path,
+        detector_backend="retinaface",
+        enforce_detection=True,
+        align=True,
+    )
+    if len(faces) != 1:
+        raise ValueError(f"Exactly one face must be visible in the {label} image")
 
 
 @app.route("/health", methods=["GET"])
@@ -18,7 +28,6 @@ def health():
 
 @app.route("/verify", methods=["POST"])
 def verify():
-    print("========== VERIFY REQUEST RECEIVED ==========")
     if "id_image" not in request.files or "selfie_image" not in request.files:
         return jsonify({
             "verified": False,
@@ -27,9 +36,6 @@ def verify():
 
     id_file = request.files["id_image"]
     selfie_file = request.files["selfie_image"]
-    print("id_image present:", "id_image" in request.files)
-    print("selfie_image present:", "selfie_image" in request.files)
-
     id_path = None
     selfie_path = None
 
@@ -38,18 +44,10 @@ def verify():
         os.close(id_fd)
         with open(id_path, "wb") as id_output:
             id_output.write(id_file.read())
-        print("ID path:", id_path)
-        print("ID exists:", os.path.exists(id_path))
-        print("ID size:", os.path.getsize(id_path) if os.path.exists(id_path) else -1)
-
         selfie_fd, selfie_path = tempfile.mkstemp(suffix=".jpg")
         os.close(selfie_fd)
         with open(selfie_path, "wb") as selfie_output:
             selfie_output.write(selfie_file.read())
-        print("Selfie path:", selfie_path)
-        print("Selfie exists:", os.path.exists(selfie_path))
-        print("Selfie size:", os.path.getsize(selfie_path) if os.path.exists(selfie_path) else -1)
-
         if not os.path.exists(id_path) or os.path.getsize(id_path) == 0:
             return jsonify({
                 "verified": False,
@@ -66,12 +64,6 @@ def verify():
         selfie_size = os.path.getsize(selfie_path)
         id_image = cv2.imread(id_path)
         selfie_image = cv2.imread(selfie_path)
-        print("Temporary ID image path:", id_path)
-        print("Temporary ID image size:", id_size)
-        print("Temporary ID image readable:", id_image is not None)
-        print("Temporary selfie image size:", selfie_size)
-        print("Temporary selfie image readable:", selfie_image is not None)
-
         if id_image is None:
             return jsonify({
                 "verified": False,
@@ -84,7 +76,9 @@ def verify():
                 "reason": "Selfie image cannot be read by OpenCV"
             }), 400
 
-        print("ABOUT TO CALL DEEPFACE")
+        require_single_face(id_path, "ID")
+        require_single_face(selfie_path, "selfie")
+
         result = DeepFace.verify(
             img1_path=id_path,
             img2_path=selfie_path,
@@ -92,27 +86,26 @@ def verify():
             detector_backend="retinaface",
             enforce_detection=True
         )
-        print("DEEPFACE COMPLETED")
-        print(result)
-
         return jsonify({
             "verified": bool(result["verified"]),
             "distance": float(result["distance"]),
             "threshold": float(result["threshold"]),
-            "model": result["model"]
+            "model": result["model"],
+            "reason": "Face match successful" if result["verified"] else "Face does not match the ID image",
         })
 
     except Exception as error:
-        print("========== DEEPFACE EXCEPTION ==========")
-        print("TYPE:", type(error).__name__)
-        print("ERROR:", repr(error))
-        traceback.print_exc()
-        print("========================================")
+        error_text = str(error).lower()
+        if isinstance(error, ValueError) or "face could not be detected" in error_text or "no face" in error_text or "exactly one face" in error_text or "processing img" in error_text or ("retinaface" in error_text and "face" in error_text):
+            reason = "Could not detect exactly one face in the ID image or selfie."
+        elif "image" in error_text and ("read" in error_text or "decode" in error_text or "format" in error_text):
+            reason = "Please upload a clearer image."
+        else:
+            reason = "Face verification failed. Please try again."
 
         return jsonify({
             "verified": False,
-            "reason": str(error),
-            "error_type": type(error).__name__
+            "reason": reason,
         }), 500
 
     finally:

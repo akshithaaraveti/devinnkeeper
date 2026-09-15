@@ -169,11 +169,6 @@ export default function HousekeepingPage() {
       qc.invalidateQueries({ queryKey: ["housekeeping"] });
       qc.invalidateQueries({ queryKey: ["rooms"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
-      apiClient.notifications.create({
-        type: "housekeeping",
-        title: "New Housekeeping Task",
-        message: `Housekeeping task assigned for Room #${variables.roomId || 'General'}`,
-      }).then(() => qc.invalidateQueries({ queryKey: ["notifications"] })).catch(() => {});
       toast.success(t("housekeeping.toastTaskCreated"));
       setDialogOpen(false);
       form.reset();
@@ -198,12 +193,6 @@ export default function HousekeepingPage() {
       qc.invalidateQueries({ queryKey: ["housekeeping"] });
       qc.invalidateQueries({ queryKey: ["rooms"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
-      const newStatus = (variables.data?.status || "updated").toUpperCase();
-      apiClient.notifications.create({
-        type: "housekeeping",
-        title: `Housekeeping Alert`,
-        message: `Housekeeping status updated to ${newStatus}`,
-      }).then(() => qc.invalidateQueries({ queryKey: ["notifications"] })).catch(() => {});
       toast.success(t("housekeeping.toastStatusUpdated"));
     },
     onError: () => toast.error(t("housekeeping.toastFailedUpdate")),
@@ -219,11 +208,6 @@ export default function HousekeepingPage() {
       qc.invalidateQueries({ queryKey: ["rooms-hk"] });
       qc.invalidateQueries({ queryKey: ["housekeeping"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
-      apiClient.notifications.create({
-        type: "housekeeping",
-        title: "Room Ready Status",
-        message: `Room #${variables.roomId} status changed to ${variables.status.toUpperCase()}`,
-      }).then(() => qc.invalidateQueries({ queryKey: ["notifications"] })).catch(() => {});
       toast.success(t("housekeeping.toastRoomStatusUpdated"));
     },
   });
@@ -385,21 +369,17 @@ export default function HousekeepingPage() {
                   return (
                     <div key={task.id} className="rounded-2xl border border-border/80 bg-card p-4 sm:p-5 space-y-4 shadow-md hover:shadow-lg transition-all flex flex-col justify-between overflow-hidden">
                       <div className="space-y-3">
-                        {/* Housekeeping Task Card 1:1 Square Image */}
-                        <div className="relative w-full aspect-square rounded-2xl overflow-hidden mb-2 border border-border/60 group-hover:border-primary/40 transition-colors shrink-0 max-h-48 sm:max-h-56">
-                          <img
-                            src="/housekeeping.png"
-                            alt={`Housekeeping Room ${roomNum}`}
-                            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                            loading="lazy"
-                          />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/20 to-transparent" />
-                          <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-black/60 backdrop-blur-xs text-[10px] font-bold text-white uppercase tracking-wider flex items-center gap-1">
-                            <Sparkles className="h-2.5 w-2.5 text-amber-300" /> Housekeeping
+                        {/* Warm room summary replaces the former housekeeping photograph. */}
+                        <div className="relative w-full rounded-2xl overflow-hidden mb-2 border border-[#B89572]/40 bg-gradient-to-br from-[#fffaf0] via-[#f3ede4] to-[#ead9c2] p-4 shadow-sm min-h-32 flex flex-col justify-between">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="px-2 py-1 rounded-md bg-[#8B6748]/10 text-[#6f4b36] text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                              <Sparkles className="h-2.5 w-2.5 text-[#B89572]" /> Housekeeping
+                            </span>
+                            <span className="text-[10px] font-semibold text-[#80644d]">Floor {floor}</span>
                           </div>
-                          <div className="absolute bottom-2 left-2.5 right-2.5 flex items-center justify-between text-white text-xs">
-                            <span className="font-extrabold text-sm drop-shadow-sm">Room {roomNum}</span>
-                            <span className="text-[11px] font-medium opacity-90">{roomType}</span>
+                          <div>
+                            <p className="font-extrabold text-lg text-[#4a3022]">Room {roomNum}</p>
+                            <p className="text-[11px] font-medium text-[#80644d] truncate">{roomType}</p>
                           </div>
                         </div>
 
@@ -574,30 +554,13 @@ export default function HousekeepingPage() {
                   transition={{ duration: 0.22, delay: Math.min(idx * 0.015, 0.25), ease: "easeOut" }}
                   className="rounded-xl border border-border bg-card p-3.5 space-y-3 shadow-2xs hover:shadow-md card-hover-lift transition-all flex flex-col justify-between"
                 >
-                  <div className="flex items-center gap-2.5">
-                    <img
-                      src={
-                        room.image ||
-                        (String(room.type).toLowerCase().includes("premium")
-                          ? "/rooms/premium.png"
-                          : String(room.type).toLowerCase().includes("family")
-                          ? "/rooms/family.png"
-                          : String(room.type).toLowerCase().includes("standard")
-                          ? "/rooms/standard.png"
-                          : String(room.type).toLowerCase().includes("suite")
-                          ? "/rooms/suite.png"
-                          : "/rooms/deluxe.png")
-                      }
-                      alt={room.type || "Room"}
-                      className="h-10 w-10 aspect-square rounded-lg object-cover border border-border/80 shrink-0 shadow-2xs"
-                      loading="lazy"
-                    />
-                    <div className="min-w-0 flex-1">
+                  <div className="rounded-lg border border-[#B89572]/35 bg-[#F3EDE4]/70 px-3 py-2.5 shadow-sm">
+                    <div className="min-w-0">
                       <div className="flex items-center justify-between">
-                        <span className="text-base font-black text-foreground">#{room.number || room.room_number}</span>
-                        <span className="text-[10px] text-muted-foreground font-mono">Floor {room.floor || 1}</span>
+                        <span className="text-base font-black text-[#4a3022]">#{room.number || room.room_number}</span>
+                        <span className="text-[10px] text-[#80644d] font-mono">Floor {room.floor || 1}</span>
                       </div>
-                      <p className="text-[11px] text-muted-foreground truncate">{room.type || "Standard"}</p>
+                      <p className="text-[11px] text-[#80644d] truncate">{room.type || "Standard"}</p>
                     </div>
                   </div>
 

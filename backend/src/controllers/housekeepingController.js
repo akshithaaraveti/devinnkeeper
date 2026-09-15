@@ -162,6 +162,15 @@ export async function updateHousekeeping(req, res) {
           roomId: item.roomId,
           metadata: { roomId: item.roomId, roomNumber: room?.room_number, taskId: item.id },
         });
+      } else if (req.body.assignedTo !== undefined) {
+        await createNotification({
+          type: NotificationType.HOUSEKEEPING_TASK_ASSIGNED,
+          title: 'Housekeeping Task Assigned',
+          message: `${roomLabel} housekeeping task assigned to ${item.assignedTo || 'the housekeeping team'}`,
+          priority: NotificationPriority.NORMAL,
+          roomId: item.roomId,
+          metadata: { roomId: item.roomId, roomNumber: room?.room_number, taskId: item.id, assignedTo: item.assignedTo },
+        });
       } else if (newStatus === 'pending' || newStatus === 'dirty') {
         await createNotification({
           type: NotificationType.ROOM_DIRTY,

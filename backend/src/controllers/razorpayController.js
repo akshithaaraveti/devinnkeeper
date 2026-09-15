@@ -5,6 +5,7 @@ import {
   fetchRazorpayPayment,
   verifyRazorpayPaymentSignature,
 } from '../services/razorpayService.js';
+import { createNotification, NotificationType, NotificationPriority } from '../utils/notificationService.js';
 
 const prisma = new PrismaClient();
 
@@ -208,6 +209,19 @@ export async function verifyPayment(req, res) {
 
       return { updatedPayment, updatedReservation };
     });
+
+    try {
+      await createNotification({
+        type: NotificationType.PAYMENT_RECEIVED,
+        title: 'Payment Received',
+        message: `Razorpay payment received for Reservation #${result.updatedReservation.id}.`,
+        priority: NotificationPriority.NORMAL,
+        reservationId: result.updatedReservation.id,
+        metadata: { paymentId: result.updatedPayment.id, status: result.updatedPayment.paymentStatus },
+      });
+    } catch (notificationError) {
+      console.error('[razorpayController] PAYMENT_RECEIVED notification failed:', notificationError.message);
+    }
 
     return res.json({
       success: true,

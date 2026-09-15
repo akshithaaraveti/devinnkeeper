@@ -37,6 +37,7 @@ import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
 import { Switch } from "./ui/switch";
 import SettingsModal from "./dashboard/SettingsModal";
+import { NotificationBell } from "./NotificationBell";
 import { useTranslation } from "react-i18next";
 
 export interface NavItem {
@@ -297,6 +298,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
           {/* Header Right Actions */}
           <div className="flex items-center gap-2 sm:gap-3">
+            <NotificationBell />
             {/* Language Switcher */}
             <div className="flex items-center gap-1 bg-card/80 border border-border px-2 py-1.5 rounded-xl text-xs font-semibold text-muted-foreground shadow-2xs">
               <Globe className="h-3.5 w-3.5 text-muted-foreground/80" />

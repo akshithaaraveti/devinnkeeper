@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Bell, Check, CheckCheck, Trash2, ExternalLink } from 'lucide-react';
+import { Bell, Check, CheckCheck, Trash2, ExternalLink, X, Calendar, Wrench, DollarSign, Sparkles, ShieldAlert } from 'lucide-react';
 import { useNotifications, AppNotification } from '../contexts/NotificationContext';
 import { useLocation } from 'wouter';
 
@@ -10,6 +10,30 @@ export const NotificationBell: React.FC = () => {
   const [dropdownPos, setDropdownPos] = useState({ top: 0, right: 0 });
   const [, setLocation] = useLocation();
   const bellRef = useRef<HTMLDivElement>(null);
+  const iconMap: Record<string, typeof Bell> = {
+    NEW_RESERVATION: Calendar,
+    RESERVATION_UPDATED: Calendar,
+    RESERVATION_CANCELLED: Calendar,
+    IDENTITY_VERIFIED: ShieldAlert,
+    DIGITAL_KEY_GENERATED: ShieldAlert,
+    PAYMENT_RECEIVED: DollarSign,
+    MAINTENANCE_CREATED: Wrench,
+    MAINTENANCE_UPDATED: Wrench,
+    HOUSEKEEPING_TASK_CREATED: Sparkles,
+    HOUSEKEEPING_TASK_UPDATED: Sparkles,
+  };
+
+  const formatRelativeTime = (value?: string) => {
+    if (!value) return 'Just now';
+    const elapsed = Math.max(0, Date.now() - new Date(value).getTime());
+    const minutes = Math.floor(elapsed / 60000);
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+  };
 
   const toggleDropdown = () => {
     if (!isOpen) {
@@ -18,7 +42,7 @@ export const NotificationBell: React.FC = () => {
       if (bellRef.current) {
         const rect = bellRef.current.getBoundingClientRect();
         setDropdownPos({
-          top: rect.bottom + window.scrollY + 8,
+          top: rect.bottom + 8,
           right: window.innerWidth - rect.right,
         });
       }
@@ -97,14 +121,19 @@ export const NotificationBell: React.FC = () => {
             </span>
           )}
         </div>
-        {unreadCount > 0 && (
-          <button
-            onClick={markAllAsRead}
-            className="text-xs text-[#8B6748] hover:text-[#7A5A3C] font-medium flex items-center gap-1 transition-colors cursor-pointer"
-          >
-            <CheckCheck className="w-3.5 h-3.5" /> Mark all read
+        <div className="flex items-center gap-2">
+          {unreadCount > 0 && (
+            <button
+              onClick={markAllAsRead}
+              className="text-xs text-[#8B6748] hover:text-[#7A5A3C] font-medium flex items-center gap-1 transition-colors cursor-pointer"
+            >
+              <CheckCheck className="w-3.5 h-3.5" /> Mark all read
+            </button>
+          )}
+          <button onClick={() => setIsOpen(false)} className="p-1 rounded-lg text-slate-400 hover:text-[#8B6748] hover:bg-[#F3EDE4]" aria-label="Close notifications">
+            <X className="w-4 h-4" />
           </button>
-        )}
+        </div>
       </div>
 
       {/* List */}
@@ -122,7 +151,9 @@ export const NotificationBell: React.FC = () => {
                 !notif.isRead ? 'bg-[#F3EDE4]/60' : ''
               }`}
             >
-              <div className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${!notif.isRead ? 'bg-[#8B6748]' : 'bg-transparent'}`} />
+              <div className={`mt-1.5 w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${!notif.isRead ? 'bg-[#F3EDE4] text-[#8B6748]' : 'bg-slate-100 text-slate-400'}`}>
+                {(() => { const Icon = iconMap[notif.type] || Bell; return <Icon className="w-4 h-4" />; })()}
+              </div>
               
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-1 mb-1">
@@ -135,7 +166,7 @@ export const NotificationBell: React.FC = () => {
                   {notif.message}
                 </p>
                 <span className="text-[10px] text-slate-400 dark:text-slate-500 mt-1 block font-mono">
-                  {new Date(notif.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  {formatRelativeTime(notif.createdAt)}
                 </span>
               </div>
 

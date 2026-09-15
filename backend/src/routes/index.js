@@ -264,7 +264,7 @@ router.delete('/maintenance/:id', authenticateToken, requirePermission('maintena
 // ─── Notifications ─────────────────────────────────────────
 router.get('/notifications', authenticateToken, listNotifications);
 router.get('/notifications/unread-count', authenticateToken, getUnreadNotificationCount);
-router.post('/notifications', authenticateToken, createNotification);
+router.post('/notifications', authenticateToken, requireRole('manager'), createNotification);
 router.patch('/notifications/:id/read', authenticateToken, markOneRead);
 router.post('/notifications/mark-all-read', authenticateToken, markAllRead);
 router.patch('/notifications/read-all', authenticateToken, markAllRead);

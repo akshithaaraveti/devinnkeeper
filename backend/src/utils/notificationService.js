@@ -21,7 +21,10 @@ export const NotificationType = {
   RESERVATION_CANCELLED:  'RESERVATION_CANCELLED',
   NEW_ARRIVAL:            'NEW_ARRIVAL',
   GUEST_CHECKED_IN:       'GUEST_CHECKED_IN',
+  IDENTITY_VERIFIED:      'IDENTITY_VERIFIED',
+  DIGITAL_KEY_GENERATED:  'DIGITAL_KEY_GENERATED',
   GUEST_CHECKED_OUT:      'GUEST_CHECKED_OUT',
+   IDENTITY_VERIFICATION_FAILED: 'IDENTITY_VERIFICATION_FAILED',
 
   // Rooms
   ROOM_STATUS_CHANGED:    'ROOM_STATUS_CHANGED',
@@ -99,6 +102,9 @@ const DEFAULT_TARGET_ROLES = {
   RESERVATION_DELETED:     ['admin', 'manager', 'receptionist', 'staff'],
   NEW_ARRIVAL:             ['admin', 'manager', 'receptionist', 'staff'],
   GUEST_CHECKED_IN:        ['admin', 'manager', 'receptionist', 'staff'],
+  IDENTITY_VERIFIED:       ['admin', 'manager', 'receptionist', 'staff'],
+   IDENTITY_VERIFICATION_FAILED: ['admin', 'manager', 'receptionist', 'staff'],
+  DIGITAL_KEY_GENERATED:   ['admin', 'manager', 'receptionist', 'staff'],
   GUEST_CHECKED_OUT:       ['admin', 'manager', 'receptionist', 'housekeeping', 'staff'],
   GUEST_DELETED:           ['admin', 'manager', 'receptionist', 'staff'],
   ROOM_STATUS_CHANGED:     ['admin', 'manager', 'receptionist', 'housekeeping', 'staff'],
@@ -197,20 +203,17 @@ export async function createNotification(data) {
       },
     });
 
-    // Emit via Socket.IO to all relevant role rooms and connected clients
+    // Emit only to the notification's intended audience.
     const io = getSocketIo();
     if (io) {
       const payload = formatNotification(notification);
-      // Emit to each role room
-      for (const role of roles) {
-        io.to(`role:${String(role).toLowerCase()}`).emit('notification:new', payload);
-      }
-      // Emit to specific user if set
       if (recipientId) {
         io.to(`user:${recipientId}`).emit('notification:new', payload);
+      } else {
+        for (const role of roles) {
+          io.to(`role:${String(role).toLowerCase()}`).emit('notification:new', payload);
+        }
       }
-      // Broadcast to all connected clients
-      io.emit('notification:new', payload);
     }
 
     return notification;
@@ -245,20 +248,8 @@ export async function getNotificationsForUser(userId, role, options = {}) {
     take: 500, // fetch a large batch then filter in JS (performance acceptable for typical hotel scale)
   });
 
-  const userRole = (role || 'staff').toLowerCase();
-  const isAdminOrManager = userRole === 'admin' || userRole === 'manager';
-
   const filtered = allNotifications.filter(n => {
-    // Parse target roles
-    let roles = [];
-    try {
-      roles = JSON.parse(n.targetRoles || '[]');
-    } catch {
-      roles = [];
-    }
-    const roleMatch = isAdminOrManager || roles.includes('*') || roles.includes('all') || roles.map(r => String(r).toLowerCase()).includes(userRole);
-    const recipientMatch = n.recipientId && n.recipientId === Number(userId);
-    if (!roleMatch && !recipientMatch) return false;
+    if (!isNotificationVisibleToUser(n, userId, role)) return false;
     if (unreadOnly && n.readAt !== null) return false;
     if (type && n.type !== type) return false;
     return true;
@@ -280,17 +271,7 @@ export async function getUnreadCount(userId, role) {
     select: { targetRoles: true, recipientId: true },
   });
 
-  const userRole = (role || 'staff').toLowerCase();
-  const isAdminOrManager = userRole === 'admin' || userRole === 'manager';
-  let count = 0;
-  for (const n of allUnread) {
-    let roles = [];
-    try { roles = JSON.parse(n.targetRoles || '[]'); } catch { roles = []; }
-    const roleMatch = isAdminOrManager || roles.includes('*') || roles.includes('all') || roles.map(r => String(r).toLowerCase()).includes(userRole);
-    const recipientMatch = n.recipientId && n.recipientId === Number(userId);
-    if (roleMatch || recipientMatch) count++;
-  }
-  return count;
+  return allUnread.filter(n => isNotificationVisibleToUser(n, userId, role)).length;
 }
 
 /**
@@ -303,15 +284,7 @@ export async function markNotificationRead(notificationId, userId, role) {
 
   if (!notification) return null;
 
-  // Authorization: user must be in targetRoles or be recipientId
-  let roles = [];
-  try { roles = JSON.parse(notification.targetRoles || '[]'); } catch { roles = []; }
-  const userRole = (role || 'staff').toLowerCase();
-  const authorized =
-    roles.map(r => r.toLowerCase()).includes(userRole) ||
-    (notification.recipientId && notification.recipientId === Number(userId));
-
-  if (!authorized) return null;
+  if (!isNotificationVisibleToUser(notification, userId, role)) return null;
 
   return await prisma.appNotification.update({
     where: { id: Number(notificationId) },
@@ -327,15 +300,9 @@ export async function markAllNotificationsRead(userId, role) {
     where: { readAt: null },
   });
 
-  const userRole = (role || 'staff').toLowerCase();
-  const idsToMark = [];
-  for (const n of allUnread) {
-    let roles = [];
-    try { roles = JSON.parse(n.targetRoles || '[]'); } catch { roles = []; }
-    const roleMatch = roles.map(r => r.toLowerCase()).includes(userRole);
-    const recipientMatch = n.recipientId && n.recipientId === Number(userId);
-    if (roleMatch || recipientMatch) idsToMark.push(n.id);
-  }
+  const idsToMark = allUnread
+    .filter(n => isNotificationVisibleToUser(n, userId, role))
+    .map(n => n.id);
 
   if (idsToMark.length === 0) return { count: 0 };
 
@@ -357,19 +324,27 @@ export async function deleteNotification(notificationId, userId, role) {
 
   if (!notification) return false;
 
-  let roles = [];
-  try { roles = JSON.parse(notification.targetRoles || '[]'); } catch { roles = []; }
-  const userRole = (role || 'staff').toLowerCase();
-  const authorized =
-    userRole === 'admin' ||
-    userRole === 'manager' ||
-    roles.map(r => r.toLowerCase()).includes(userRole) ||
-    (notification.recipientId && notification.recipientId === Number(userId));
-
-  if (!authorized) return false;
+  if (!isNotificationVisibleToUser(notification, userId, role)) return false;
 
   await prisma.appNotification.delete({ where: { id: Number(notificationId) } });
   return true;
+}
+
+function parseTargetRoles(notification) {
+  try {
+    const roles = JSON.parse(notification.targetRoles || '[]');
+    return Array.isArray(roles) ? roles.map(value => String(value).toLowerCase()) : [];
+  } catch {
+    return [];
+  }
+}
+
+function isNotificationVisibleToUser(notification, userId, role) {
+  const userRole = String(role || 'staff').toLowerCase();
+  const roles = parseTargetRoles(notification);
+  const roleMatch = roles.includes('*') || roles.includes('all') || roles.includes(userRole);
+  const recipientMatch = notification.recipientId != null && notification.recipientId === Number(userId);
+  return roleMatch || recipientMatch;
 }
 
 /**

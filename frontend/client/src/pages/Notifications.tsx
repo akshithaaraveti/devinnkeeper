@@ -4,7 +4,7 @@ import { Bell, CheckCheck, Trash2, Search, AlertCircle, Info, CheckCircle2, Shie
 import { useLocation } from 'wouter';
 
 export const NotificationsPage: React.FC = () => {
-  const { notifications, unreadCount, loading, markAsRead, markAllAsRead, deleteNotification } = useNotifications();
+  const { notifications, unreadCount, loading, error, markAsRead, markAllAsRead, deleteNotification } = useNotifications();
   const [, setLocation] = useLocation();
   const [filter, setFilter] = useState<'ALL' | 'UNREAD' | 'HIGH'>('ALL');
   const [search, setSearch] = useState('');
@@ -106,6 +106,12 @@ export const NotificationsPage: React.FC = () => {
         {loading ? (
           <div className="p-12 text-center text-slate-500 text-sm">
             Loading notifications...
+          </div>
+        ) : error ? (
+          <div className="p-12 text-center text-rose-700 text-sm">
+            <AlertCircle className="w-10 h-10 mx-auto mb-2 text-rose-300" />
+            <p className="font-medium">{error}</p>
+            <p className="text-xs text-rose-500 mt-1">Please try again shortly.</p>
           </div>
         ) : filteredNotifications.length === 0 ? (
           <div className="p-12 text-center text-slate-500 space-y-2">

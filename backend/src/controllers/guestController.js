@@ -89,6 +89,18 @@ export async function createGuest(req, res) {
     const safeData = filterGuestFields(req.body);
     const guest = await prisma.guest.create({ data: safeData });
     res.status(201).json(guest);
+    try {
+      await createNotification({
+        type: NotificationType.USER_CREATED,
+        title: 'Guest Created',
+        message: `Guest profile created for ${guest.firstName} ${guest.lastName || ''}`.trim(),
+        priority: NotificationPriority.NORMAL,
+        guestId: guest.id,
+        metadata: { guestId: guest.id },
+      });
+    } catch (notifErr) {
+      console.error('[guestController] GUEST_CREATED notification failed:', notifErr.message);
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -102,6 +114,18 @@ export async function updateGuest(req, res) {
     const safeData = filterGuestFields(req.body);
     const guest = await prisma.guest.update({ where: { id: Number(req.params.id) }, data: safeData });
     res.json(guest);
+    try {
+      await createNotification({
+        type: NotificationType.USER_UPDATED,
+        title: 'Guest Updated',
+        message: `Guest profile updated for ${guest.firstName} ${guest.lastName || ''}`.trim(),
+        priority: NotificationPriority.NORMAL,
+        guestId: guest.id,
+        metadata: { guestId: guest.id },
+      });
+    } catch (notifErr) {
+      console.error('[guestController] GUEST_UPDATED notification failed:', notifErr.message);
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
