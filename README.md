@@ -1,114 +1,168 @@
-# InnKeeper 🏨
+# InnKeeper – Hotel Management System
 
-InnKeeper is a comprehensive Motel & Hotel Management Application designed to streamline front desk operations, booking management, customer records, and administrative workflows.
+InnKeeper is a full-stack hotel management and guest check-in application designed to simplify hotel operations through a modern web-based platform.
 
----
+The application provides an end-to-end workflow for managing reservations, guests, rooms, housekeeping, maintenance, payments, secure identity verification, digital check-in, digital keys, and notifications.
 
-## 🏗 Project Architecture
+## 🚀 Features
 
-This project is structured as a full-stack monorepo:
+### 🔐 Authentication & Role-Based Access
+- Secure user authentication
+- Login and signup
+- Forgot password and reset password
+- Role-based access control
+- Different access levels for different hotel staff roles
 
-- **`backend/`**: Node.js & Express API server powered by Prisma ORM and PostgreSQL.
-- **`frontend/`**: React application built with Vite, Tailwind CSS, Lucide Icons, and modern UI components.
+### 🏨 Reservation Management
+- Create new room reservations
+- View reservation details
+- Edit and update reservations
+- Manage reservation status
+- Manage guest and booking information
+- Payment status tracking
 
----
+### 👤 Guest Management
+- Add and manage guest information
+- View guest details
+- Update guest information
+- Maintain guest-related reservation data
 
-## 🛠 Tech Stack
+### 🛏️ Room Management
+- View available and occupied rooms
+- Room details and status
+- Room type and pricing information
+- Room booking and assignment
+
+### 🧹 Housekeeping Management
+- Manage housekeeping tasks
+- Track room cleaning status
+- Assign and update housekeeping activities
+- Monitor housekeeping operations
+
+### 🔧 Maintenance Management
+- Create and manage maintenance requests
+- Assign maintenance tasks
+- Track maintenance status
+- Manage completed maintenance activities
+
+### 🚗 Vehicle Management
+- Manage hotel vehicle-related information
+- Track vehicle requests and status
+- Manage assignments where applicable
+
+### 🪪 Face Identity Verification
+
+InnKeeper uses **DeepFace** for secure face identity verification during the check-in process.
+
+The verification flow is:
+
+Driver Licence Image + Selfie  
+↓  
+Backend Verification API  
+↓  
+DeepFace  
+↓  
+ArcFace Face Recognition Model  
+↓  
+RetinaFace Face Detection  
+↓  
+Face Comparison  
+↓  
+Verified / Not Verified
+
+The system compares the face present in the uploaded ID image with the guest's selfie.
+
+> Note: DeepFace is used for face identity matching. It does not determine whether a driving licence document itself is authentic.
+
+### 💳 Payment Integration
+- Online payment support
+- Razorpay integration
+- Payment verification through the backend
+- Payment status tracking
+- Secure server-side payment handling
+
+### 📱 Digital Check-In & Digital Key
+- Secure check-in access
+- Identity verification before check-in completion
+- Digital key generation after successful verification and payment
+- Room access information
+- QR-based digital access credential
+- Check-in details download
+
+### 🔔 Notifications Center
+- Centralized notification system
+- Real-time/latest notification updates
+- Unread notification count
+- Mark individual notifications as read
+- Mark all notifications as read
+- Notifications for important hotel operations
+- Role-based notification targeting
+
+### 📊 Dashboard
+- Hotel operation overview
+- Reservation information
+- Room status
+- Guest information
+- Notifications
+- Quick access to important hotel management functions
+
+## 🛠️ Technology Stack
 
 ### Frontend
-- **Framework:** React + Vite
-- **Styling:** Tailwind CSS + Radix UI
-- **Routing:** React Router / Wouter
-- **State Management & Data Fetching:** TanStack Query (React Query), Zustand
+- React
+- TypeScript
+- Vite
+- Axios
+- React-based UI components
 
 ### Backend
-- **Runtime:** Node.js
-- **Framework:** Express.js
-- **Database ORM:** Prisma ORM
-- **Database:** PostgreSQL
-- **Authentication:** JWT (JSON Web Tokens) + bcryptjs
+- Node.js
+- Express.js
+- Prisma ORM
+- REST APIs
 
----
+### Database
+- PostgreSQL
 
-## 🚀 Getting Started
+### Face Verification
+- Python
+- DeepFace
+- ArcFace
+- RetinaFace
 
-### Prerequisites
-- Node.js (v18+ recommended)
-- npm or yarn
-- PostgreSQL instance running locally or hosted
+### Payments
+- Razorpay
 
----
+### Other Technologies
+- Git & GitHub
+- REST API
+- JWT-based authentication
+- Role-Based Access Control
 
-## 📦 Installation & Setup
+## 📁 Project Structure
 
-### 1. Clone the repository
-```bash
-git clone <repository-url>
-cd InnKeeper
-```
-
-### 2. Backend Setup
-Navigate to the `backend` directory, install dependencies, and setup environment variables:
-
-```bash
-cd backend
-npm install
-```
-
-Create a `.env` file inside the `backend` folder:
-```env
-PORT=5000
-DATABASE_URL="postgresql://username:password@localhost:5432/innkeeper_db?schema=public"
-JWT_SECRET="your_jwt_secret_key"
-```
-
-Run database migrations:
-```bash
-npm run prisma:generate
-npm run prisma:migrate
-```
-
-Start the backend server:
-```bash
-npm run dev
-```
-
-### 3. Frontend Setup
-In a new terminal window, navigate to the `frontend` directory:
-
-```bash
-cd frontend
-npm install
-```
-
-Create a `.env` file inside the `frontend` folder:
-```env
-VITE_API_BASE_URL=http://localhost:5000/api
-```
-
-Start the frontend development server:
-```bash
-npm run dev
-```
-
----
-
-## 📜 Available Scripts
-
-### Backend (`backend/`)
-- `npm run dev`: Starts the backend server in development mode using `nodemon`.
-- `npm run start`: Runs the production server.
-- `npm run prisma:generate`: Generates Prisma Client artifacts.
-- `npm run prisma:migrate`: Applies database migrations.
-- `npm run prisma:seed`: Seeds initial data into the database.
-
-### Frontend (`frontend/`)
-- `npm run dev`: Starts the Vite development server.
-- `npm run build`: Builds the project for production.
-- `npm run preview`: Previews the production build locally.
-
----
-
-## 🛡 License
-
-This project is proprietary and confidential.
+```text
+InnKeeper/
+│
+├── backend/
+│   ├── prisma/
+│   ├── src/
+│   │   ├── controllers/
+│   │   ├── routes/
+│   │   ├── services/
+│   │   └── utils/
+│   │
+│   └── face-verification/
+│       ├── app.py
+│       └── requirements.txt
+│
+├── frontend/
+│   ├── client/
+│   │   └── src/
+│   │       ├── components/
+│   │       ├── contexts/
+│   │       └── pages/
+│   │
+│   └── ...
+│
+└── README.md
