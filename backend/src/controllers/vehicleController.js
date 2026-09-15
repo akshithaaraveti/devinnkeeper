@@ -1,4 +1,5 @@
 import { prisma } from '../utils/db.js';
+import { createNotification, NotificationType, NotificationPriority } from '../utils/notificationService.js';
 
 function paginate(data, page, limit) {
   const total = data.length;
@@ -55,6 +56,18 @@ export async function createVehicle(req, res) {
       }
     });
     res.status(201).json(vehicle);
+
+    try {
+      await createNotification({
+        type: NotificationType.VEHICLE_REGISTERED,
+        title: 'Vehicle Registered',
+        message: `New vehicle registered: ${vehicle.make} ${vehicle.model || ''} (${vehicle.licensePlate})${vehicle.parkingSlot ? ` in slot ${vehicle.parkingSlot}` : ''}`,
+        priority: NotificationPriority.NORMAL,
+        metadata: { vehicleId: vehicle.id, licensePlate: vehicle.licensePlate, parkingSlot: vehicle.parkingSlot },
+      });
+    } catch (notifErr) {
+      console.error('[vehicleController] VEHICLE_REGISTERED notification failed:', notifErr.message);
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -69,6 +82,18 @@ export async function updateVehicle(req, res) {
     }
     const vehicle = await prisma.vehicle.update({ where: { id: Number(req.params.id) }, data: safeData });
     res.json(vehicle);
+
+    try {
+      await createNotification({
+        type: NotificationType.VEHICLE_UPDATED,
+        title: 'Vehicle Updated',
+        message: `Vehicle details updated for ${vehicle.make} ${vehicle.model || ''} (${vehicle.licensePlate})`,
+        priority: NotificationPriority.NORMAL,
+        metadata: { vehicleId: vehicle.id, licensePlate: vehicle.licensePlate },
+      });
+    } catch (notifErr) {
+      console.error('[vehicleController] VEHICLE_UPDATED notification failed:', notifErr.message);
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -76,8 +101,26 @@ export async function updateVehicle(req, res) {
 
 export async function deleteVehicle(req, res) {
   try {
-    await prisma.vehicle.delete({ where: { id: Number(req.params.id) } });
+    const id = Number(req.params.id);
+    const existing = await prisma.vehicle.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ error: 'Vehicle not found' });
+    }
+
+    await prisma.vehicle.delete({ where: { id } });
     res.json({ success: true });
+
+    try {
+      await createNotification({
+        type: NotificationType.VEHICLE_DELETED,
+        title: 'Vehicle Removed',
+        message: `Vehicle removed: ${existing.make} ${existing.model || ''} (${existing.licensePlate})`,
+        priority: NotificationPriority.NORMAL,
+        metadata: { vehicleId: existing.id, licensePlate: existing.licensePlate },
+      });
+    } catch (notifErr) {
+      console.error('[vehicleController] VEHICLE_DELETED notification failed:', notifErr.message);
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

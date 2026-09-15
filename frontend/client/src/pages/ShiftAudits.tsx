@@ -25,11 +25,45 @@ export default function ShiftAuditsPage() {
   const items = q.data?.items ?? [];
   const totalPages = Math.ceil(items.length / itemsPerPage) || 1;
 
-  const create = useMutation({ mutationFn: (payload:any)=>apiClient.shiftAudits.create(payload), onSuccess: ()=>{qc.invalidateQueries({ queryKey: ["shift-audits"] }); qc.invalidateQueries({ queryKey: ["dashboard"] }); toast.success("Audit created");}, onError: (err:any)=>{ const msg = err?.response?.data?.error ?? err?.message ?? "Failed"; toast.error(String(msg)); } });
+  const create = useMutation({
+    mutationFn: (payload: any) => apiClient.shiftAudits.create(payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["shift-audits"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+      toast.success("Audit created");
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.error ?? err?.message ?? "Failed";
+      toast.error(String(msg));
+    },
+  });
 
-  const update = useMutation({ mutationFn: ({ id, data }:any)=>apiClient.shiftAudits.update(id, data), onSuccess: ()=>{qc.invalidateQueries({ queryKey: ["shift-audits"] }); toast.success("Audit updated");}, onError: (err:any)=>{ const msg = err?.response?.data?.error ?? err?.message ?? "Failed"; toast.error(String(msg)); } });
+  const update = useMutation({
+    mutationFn: ({ id, data }: any) => apiClient.shiftAudits.update(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["shift-audits"] });
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+      toast.success("Audit updated");
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.error ?? err?.message ?? "Failed";
+      toast.error(String(msg));
+    },
+  });
 
-  const remove = useMutation({ mutationFn: (id:string)=>apiClient.shiftAudits.remove(id), onSuccess: ()=>{qc.invalidateQueries({ queryKey: ["shift-audits"] }); toast.success("Audit removed");}, onError: (err:any)=>{ const msg = err?.response?.data?.error ?? err?.message ?? "Failed"; toast.error(String(msg)); } });
+  const remove = useMutation({
+    mutationFn: (id: string) => apiClient.shiftAudits.remove(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["shift-audits"] });
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+      toast.success("Audit removed");
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.error ?? err?.message ?? "Failed";
+      toast.error(String(msg));
+    },
+  });
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
@@ -135,10 +169,10 @@ export default function ShiftAuditsPage() {
                 </FormControl>
               </FormItem>
               <div className="flex gap-3 justify-end pt-4">
-                <Button type="button" variant="outline" className="h-11 rounded-2xl border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium px-6 shadow-2xs cursor-pointer" onClick={()=>setDialogOpen(false)}>
+                <Button type="button" variant="outline" className="h-11 rounded-2xl font-medium px-6 shadow-2xs cursor-pointer" onClick={()=>setDialogOpen(false)}>
                   {t("common.cancel")}
                 </Button>
-                <Button type="submit" className="h-11 rounded-2xl bg-[#8B6748] hover:bg-[#7A5A3C] text-white font-semibold px-6 shadow-md shadow-[#8B6748]/20" disabled={create.isPending || update.isPending}>
+                <Button type="submit" className="h-11 rounded-2xl font-semibold px-6 shadow-md shadow-primary/20" disabled={create.isPending || update.isPending}>
                   {create.isPending || update.isPending ? t("common.saving") : t("shiftAudits.saveAudit")}
                 </Button>
               </div>

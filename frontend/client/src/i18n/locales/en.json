@@ -444,6 +444,7 @@
     "completeRepair": "Complete Repair",
     "resume": "Resume",
     "pause": "Pause",
+    "resolve": "Resolve Issue",
     "showingTickets": "Showing {{start}} - {{end}} of {{total}} maintenance tickets",
     "newTicket": "Report Maintenance Issue",
     "roomLocation": "Room Location",

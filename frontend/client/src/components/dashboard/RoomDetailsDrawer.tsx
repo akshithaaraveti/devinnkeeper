@@ -326,7 +326,7 @@ export default function RoomDetailsDrawer({ isOpen, onClose, room, guest, reserv
                     </div>
                     <Button
                       onClick={() => setActiveStep("BOOKING")}
-                      className="rounded-xl font-bold text-xs bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 shadow-xs cursor-pointer shrink-0 w-full sm:w-auto"
+                      className="rounded-xl font-bold text-xs bg-primary hover:bg-primary/90 text-primary-foreground gap-1.5 shadow-sm shadow-primary/20 cursor-pointer shrink-0 w-full sm:w-auto"
                     >
                       <Calendar className="h-3.5 w-3.5" />
                       {t("roomDrawer.bookThisRoom", "Book This Room")}
@@ -443,7 +443,7 @@ export default function RoomDetailsDrawer({ isOpen, onClose, room, guest, reserv
                         <Button
                           onClick={handleBookRoom}
                           disabled={isSubmitting}
-                          className="flex-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-2 shadow-sm cursor-pointer"
+                          className="flex-1 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold gap-2 shadow-sm shadow-primary/25 cursor-pointer"
                         >
                           <CheckCircle2 className="h-4 w-4" /> {isSubmitting ? "Booking..." : t("roomDrawer.confirmAndBook")}
                         </Button>
@@ -524,7 +524,7 @@ export default function RoomDetailsDrawer({ isOpen, onClose, room, guest, reserv
                   {isReadyToBook && (
                     <Button
                       onClick={() => setActiveStep("BOOKING")}
-                      className="flex-1 sm:flex-none px-6 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 font-bold text-sm rounded-xl shadow-md cursor-pointer"
+                      className="flex-1 sm:flex-none px-6 flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground py-2.5 font-bold text-sm rounded-xl shadow-md shadow-primary/20 cursor-pointer"
                     >
                       <Calendar className="h-4 w-4" /> {t("roomDrawer.bookThisRoom", "Book This Room")}
                     </Button>

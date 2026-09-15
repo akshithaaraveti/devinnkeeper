@@ -100,6 +100,61 @@ function ProtectedApp() {
   );
 }
 
+function CheckInRoute() {
+  const { isAuthenticated, loading } = useAuthContext();
+  const searchParams = new URLSearchParams(window.location.search);
+  const hasCheckInToken = Boolean(searchParams.get("token") || sessionStorage.getItem("innkeeper_checkin_token"));
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-600">
+        <div className="rounded-2xl border border-slate-200 bg-white/80 px-6 py-5 shadow-sm backdrop-blur">
+          Preparing check-in...
+        </div>
+      </div>
+    );
+  }
+
+  // If accessed via a guest check-in link/token or by an unauthenticated user, render standalone guest check-in page without DashboardLayout
+  if (hasCheckInToken || !isAuthenticated) {
+    return <CheckInVerification isGuestMode={true} />;
+  }
+
+  // Only logged-in hotel staff navigating within the dashboard view see DashboardLayout
+  return (
+    <DashboardLayout>
+      <CheckInVerification isGuestMode={false} />
+    </DashboardLayout>
+  );
+}
+
+function DigitalKeyRoute() {
+  const { isAuthenticated, loading } = useAuthContext();
+  const searchParams = new URLSearchParams(window.location.search);
+  const hasCheckInToken = Boolean(searchParams.get("token") || sessionStorage.getItem("innkeeper_checkin_token"));
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-600">
+        <div className="rounded-2xl border border-slate-200 bg-white/80 px-6 py-5 shadow-sm backdrop-blur">
+          Loading digital room pass...
+        </div>
+      </div>
+    );
+  }
+
+  // If accessed by a guest or without staff login, show standalone DigitalKeyPage
+  if (hasCheckInToken || !isAuthenticated) {
+    return <DigitalKeyPage />;
+  }
+
+  return (
+    <DashboardLayout>
+      <DigitalKeyPage />
+    </DashboardLayout>
+  );
+}
+
 function PublicRoutes() {
   return (
     <Switch>
@@ -107,14 +162,14 @@ function PublicRoutes() {
       <Route path="/signup" component={SignupPage} />
       <Route path="/forgot-password" component={ForgotPasswordPage} />
       <Route path="/reset-password" component={ResetPasswordPage} />
-      <Route path="/checkin" component={CheckInVerification} />
+      <Route path="/checkin" component={CheckInRoute} />
       <Route path="/dashboard" component={ProtectedApp} />
       <Route path="/payments" component={ProtectedApp} />
       <Route path="/vehicles" component={ProtectedApp} />
       <Route path="/cash-ledger" component={ProtectedApp} />
       <Route path="/shift-audits" component={ProtectedApp} />
       <Route path="/reservations" component={ProtectedApp} />
-      <Route path="/digital-key" component={ProtectedApp} />
+      <Route path="/digital-key" component={DigitalKeyRoute} />
       <Route path="/guests" component={ProtectedApp} />
       <Route path="/housekeeping" component={ProtectedApp} />
       <Route path="/maintenance" component={ProtectedApp} />

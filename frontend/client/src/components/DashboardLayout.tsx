@@ -219,8 +219,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 title={translatedLabel}
                 className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-all duration-150 cursor-pointer ${
                   isActive
-                    ? "bg-[#8B6748] text-white shadow-sm font-semibold"
-                    : "text-muted-foreground hover:bg-[#F3EDE4] hover:text-[#3F352D]"
+                    ? "bg-primary text-primary-foreground shadow-sm font-semibold"
+                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                 }`}
               >
                 <item.icon className="h-4.5 w-4.5 shrink-0" />

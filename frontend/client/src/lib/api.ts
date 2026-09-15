@@ -90,11 +90,13 @@ export const apiClient = {
     list: (params?: any) => api.get("/housekeeping", { params }),
     create: (data: any) => api.post("/housekeeping", data),
     update: (id: string, data: any) => api.put(`/housekeeping/${id}`, data),
+    remove: (id: string) => api.delete(`/housekeeping/${id}`),
   },
   maintenance: {
     list: (params?: any) => api.get("/maintenance", { params }),
     create: (data: any) => api.post("/maintenance", data),
     update: (id: string, data: any) => api.put(`/maintenance/${id}`, data),
+    remove: (id: string) => api.delete(`/maintenance/${id}`),
   },
   notifications: {
     list: (params?: any) => api.get("/notifications", { params }),

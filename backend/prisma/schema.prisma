@@ -418,7 +418,7 @@ model AppNotification {
   metadata      String?
   readAt        DateTime?
   createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  updatedAt     DateTime  @default(now()) @updatedAt
 
   @@index([type])
   @@index([readAt])

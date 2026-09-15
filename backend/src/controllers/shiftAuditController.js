@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { createNotification, NotificationType, NotificationPriority } from '../utils/notificationService.js';
 const prisma = new PrismaClient();
 
 function paginate(data, page, limit) {
@@ -62,8 +63,26 @@ export async function updateShiftAudit(req, res) {
 
 export async function deleteShiftAudit(req, res) {
   try {
-    await prisma.shiftAudit.delete({ where: { id: Number(req.params.id) } });
+    const id = Number(req.params.id);
+    const existing = await prisma.shiftAudit.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ error: 'Shift audit record not found' });
+    }
+
+    await prisma.shiftAudit.delete({ where: { id } });
     res.json({ success: true });
+
+    try {
+      await createNotification({
+        type: NotificationType.SHIFT_AUDIT_DELETED,
+        title: 'Shift Audit Deleted',
+        message: `Shift audit record #${existing.id} for ${existing.employeeName} was deleted`,
+        priority: NotificationPriority.HIGH,
+        metadata: { auditId: existing.id, employeeName: existing.employeeName },
+      });
+    } catch (notifErr) {
+      console.error('[shiftAuditController] SHIFT_AUDIT_DELETED notification failed:', notifErr.message);
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

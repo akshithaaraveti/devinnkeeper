@@ -50,6 +50,7 @@ interface Room {
   amenities: string | null;
   image?: string | null;
   isAvailable?: number;
+  bookImmediately?: boolean;
 }
 
 interface RoomStatusBoardProps {
@@ -287,14 +288,14 @@ export default function RoomStatusBoard({ rooms, onRoomClick }: RoomStatusBoardP
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <CardTitle className="text-base sm:text-lg font-bold flex items-center gap-2 text-foreground">
-              <Bed className="h-4.5 w-4.5 sm:h-5 sm:w-5 text-sky-600 dark:text-sky-400" />
+              <Bed className="h-4.5 w-4.5 sm:h-5 sm:w-5 text-primary" />
               {t("dashboard.roomStatusBoard")}
             </CardTitle>
-            <div className="flex items-center gap-1.5 rounded-full bg-sky-50 dark:bg-sky-950/60 px-2.5 py-0.5 text-xs font-semibold text-sky-700 dark:text-sky-300 border border-sky-200/60 dark:border-sky-800/60">
+            <div className="flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary border border-primary/20">
               <Sparkles className="h-3 w-3" />
               {t("dashboard.roomsCount", { count: sortedRooms.length })}
             </div>
-            <Button size="sm" onClick={openAddRoom} className="h-7 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-2.5 sm:px-3 cursor-pointer">
+            <Button size="sm" onClick={openAddRoom} className="h-7 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold px-2.5 sm:px-3 cursor-pointer">
               <Plus className="h-3.5 w-3.5 mr-1" />
               Add Room
             </Button>
@@ -582,7 +583,7 @@ export default function RoomStatusBoard({ rooms, onRoomClick }: RoomStatusBoardP
                                           e.stopPropagation();
                                           onRoomClick({ room: { ...room, bookImmediately: true } });
                                         }}
-                                        className="h-7 px-2.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg shadow-2xs gap-1 cursor-pointer"
+                                        className="h-7 px-2.5 text-xs bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-lg shadow-2xs gap-1 cursor-pointer"
                                         title={`Book Room ${room.number} Now`}
                                       >
                                         <Calendar className="h-3 w-3" />
@@ -699,7 +700,7 @@ export default function RoomStatusBoard({ rooms, onRoomClick }: RoomStatusBoardP
                                     e.stopPropagation();
                                     onRoomClick({ room: { ...room, bookImmediately: true } });
                                   }}
-                                  className="h-6 px-2 flex items-center gap-1 rounded-md bg-emerald-600 text-white font-bold text-[10px] shadow-xs hover:bg-emerald-700 transition-colors cursor-pointer"
+                                  className="h-6 px-2 flex items-center gap-1 rounded-md bg-primary text-primary-foreground font-bold text-[10px] shadow-xs hover:bg-primary/90 transition-colors cursor-pointer"
                                   title="Book this room"
                                 >
                                   <Calendar className="h-2.5 w-2.5" /> Book
@@ -814,7 +815,7 @@ export default function RoomStatusBoard({ rooms, onRoomClick }: RoomStatusBoardP
                                       e.stopPropagation();
                                       onRoomClick({ room: { ...room, bookImmediately: true } });
                                     }}
-                                    className="w-full py-1.5 px-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs hover:shadow-sm transition-all cursor-pointer group/btn"
+                                    className="w-full py-1.5 px-2.5 rounded-xl bg-primary hover:bg-primary/90 active:bg-primary/95 text-primary-foreground font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs hover:shadow-sm transition-all cursor-pointer group/btn"
                                     title={`Book Room ${room.number} Now`}
                                   >
                                     <Calendar className="h-3.5 w-3.5 transition-transform group-hover/btn:scale-110" />
@@ -948,7 +949,7 @@ export default function RoomStatusBoard({ rooms, onRoomClick }: RoomStatusBoardP
               </Button>
               <Button
                 type="submit"
-                className="h-11 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6"
+                className="h-11 rounded-2xl bg-primary hover:bg-primary/90 text-primary-foreground font-semibold px-6 cursor-pointer"
                 disabled={createRoomM.isPending || updateRoomM.isPending}
               >
                 {createRoomM.isPending || updateRoomM.isPending ? "Saving..." : editingRoom ? "Save Changes" : "Create Room"}

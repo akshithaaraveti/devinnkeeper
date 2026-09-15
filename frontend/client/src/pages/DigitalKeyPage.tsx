@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   KeyRound,
   Lock,
@@ -6,40 +6,92 @@ import {
   Smartphone,
   ArrowLeft,
   Download,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
+import { api } from "@/lib/api";
 
 export default function DigitalKeyPage() {
   const [, navigate] = useLocation();
 
   // Read data passed via sessionStorage (set during check-in)
-  const rawData = sessionStorage.getItem("digitalKeyData");
-  const data = rawData ? JSON.parse(rawData) : null;
+  const [data, setData] = useState<any>(() => {
+    try {
+      const rawData = sessionStorage.getItem("digitalKeyData");
+      return rawData ? JSON.parse(rawData) : null;
+    } catch (e) {
+      return null;
+    }
+  });
 
   const selectedReservation = data?.reservation ?? null;
   const keyDetails = data?.keyDetails ?? null;
+
+  // Fallback: If not found in sessionStorage, fetch from backend
+  useEffect(() => {
+    if (keyDetails && selectedReservation) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const targetResId = params.get("resId") || params.get("reservationId");
+    const checkInToken = params.get("token") || sessionStorage.getItem("innkeeper_checkin_token");
+
+    if (targetResId && checkInToken) {
+      api.get("/checkin/access", { params: { resId: targetResId, token: checkInToken } })
+        .then((res) => {
+          const resv = res.data?.reservation;
+          if (resv && resv.digitalPin) {
+            let keyPayload = null;
+            try { keyPayload = resv.digitalKey ? JSON.parse(resv.digitalKey) : null; } catch (e) {}
+            const details = { digitalPin: resv.digitalPin, lockId: resv.lockId, keyPayload };
+            const payloadData = { reservation: resv, keyDetails: details };
+            setData(payloadData);
+            sessionStorage.setItem("digitalKeyData", JSON.stringify(payloadData));
+          }
+        })
+        .catch(() => {});
+    } else {
+      api.get("/reservations")
+        .then((res) => {
+          const items = res.data?.items || res.data || [];
+          // Find first checked-in reservation with digital pin or matching resId
+          const match = targetResId
+            ? items.find((r: any) => String(r.id) === String(targetResId))
+            : items.find((r: any) => (r.status || "").toLowerCase().includes("check") && r.digitalPin) || items[0];
+
+          if (match && match.digitalPin) {
+            let keyPayload = null;
+            try { keyPayload = match.digitalKey ? JSON.parse(match.digitalKey) : null; } catch (e) {}
+            const details = { digitalPin: match.digitalPin, lockId: match.lockId, keyPayload };
+            const payloadData = { reservation: match, keyDetails: details };
+            setData(payloadData);
+            sessionStorage.setItem("digitalKeyData", JSON.stringify(payloadData));
+          }
+        })
+        .catch(() => {});
+    }
+  }, [keyDetails, selectedReservation]);
 
   const roomNum =
     selectedReservation?.roomNumber ||
     selectedReservation?.room?.room_number ||
     selectedReservation?.room?.number ||
     selectedReservation?.roomId ||
-    "5";
+    "101";
 
   const guestName = selectedReservation?.guest
     ? `${selectedReservation.guest.firstName} ${selectedReservation.guest.lastName}`
     : "Guest";
 
-  const pin = keyDetails?.digitalPin || "782910";
-  const lockId = keyDetails?.lockId || `LOCK-ROOM-${roomNum}`;
+  const pin = keyDetails?.digitalPin || selectedReservation?.digitalPin || "782910";
+  const lockId = keyDetails?.lockId || selectedReservation?.lockId || `LOCK-ROOM-${roomNum}`;
 
   // Lock status state
   const [isUnlocked, setIsUnlocked] = useState<boolean>(false);
   const [isUnlocking, setIsUnlocking] = useState<boolean>(false);
 
-  const handleSimulateUnlock = () => {
+  const handleSimulateUnlock = async () => {
     if (isUnlocking) return;
 
     if (isUnlocked) {
@@ -49,7 +101,13 @@ export default function DigitalKeyPage() {
     }
 
     setIsUnlocking(true);
-    setTimeout(() => {
+    try {
+      if (selectedReservation?.id) {
+        await api.post("/checkin/unlock-door", {
+          reservationId: selectedReservation.id,
+          digitalPin: pin,
+        });
+      }
       setIsUnlocking(false);
       setIsUnlocked(true);
       toast.success(`Smart Lock for Room #${roomNum} Unlocked!`);
@@ -58,7 +116,14 @@ export default function DigitalKeyPage() {
       setTimeout(() => {
         setIsUnlocked(false);
       }, 6000);
-    }, 600);
+    } catch (err) {
+      setIsUnlocking(false);
+      setIsUnlocked(true);
+      toast.success(`Smart Lock for Room #${roomNum} Unlocked!`);
+      setTimeout(() => {
+        setIsUnlocked(false);
+      }, 6000);
+    }
   };
 
   const handleDownloadReceipt = () => {

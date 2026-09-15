@@ -85,6 +85,21 @@ export async function updateHousekeeping(req, res) {
             notes: req.body.notes || 'Room marked dirty - Turnaround cleaning required'
           }
         });
+        // Fire notification for newly created task
+        try {
+          const room = await prisma.room.findUnique({ where: { id: roomId } });
+          const roomLabel = room ? `Room ${room.room_number}` : `Room ${roomId}`;
+          await createNotification({
+            type: NotificationType.HOUSEKEEPING_TASK_UPDATED,
+            title: 'Housekeeping Cleaning In Progress',
+            message: `Housekeeping started turnaround cleaning for ${roomLabel}`,
+            priority: NotificationPriority.NORMAL,
+            roomId,
+            metadata: { roomId, roomNumber: room?.room_number, taskId: existing.id }
+          });
+        } catch (notifErr) {
+          console.error('[housekeepingController] fallback notification error:', notifErr.message);
+        }
         return res.json(existing);
       }
       numericId = existing.id;
@@ -107,34 +122,51 @@ export async function updateHousekeeping(req, res) {
     // Fire notification based on status
     try {
       const room = item.roomId ? await prisma.room.findUnique({ where: { id: item.roomId } }) : null;
-      const roomLabel = room ? `Room ${room.room_number}` : (item.roomId ? `Room ${item.roomId}` : '');
+      const roomLabel = room ? `Room ${room.room_number}` : (item.roomId ? `Room ${item.roomId}` : 'Room');
       const newStatus = (req.body.status || '').toLowerCase();
 
-      if (newStatus === 'completed' || newStatus === 'done') {
+      if (newStatus === 'clean' || newStatus === 'completed' || newStatus === 'done') {
         await createNotification({
           type: NotificationType.HOUSEKEEPING_TASK_COMPLETED,
-          title: 'Housekeeping Completed',
-          message: `Housekeeping task completed${roomLabel ? ` for ${roomLabel}` : ''}`,
+          title: 'Housekeeping Clean Completed',
+          message: `${roomLabel} marked clean & vacant by Housekeeping`,
           priority: NotificationPriority.NORMAL,
           roomId: item.roomId,
           metadata: { roomId: item.roomId, roomNumber: room?.room_number, taskId: item.id },
         });
-        // Also notify room is now clean
         if (item.roomId) {
           await createNotification({
             type: NotificationType.ROOM_CLEAN,
-            title: 'Room Clean',
-            message: `${roomLabel} has been cleaned and is ready`,
+            title: 'Room Clean & Ready',
+            message: `${roomLabel} has been cleaned and is ready for guest arrival`,
             priority: NotificationPriority.NORMAL,
             roomId: item.roomId,
             metadata: { roomId: item.roomId, roomNumber: room?.room_number },
           });
         }
+      } else if (newStatus === 'inspected') {
+        await createNotification({
+          type: NotificationType.ROOM_READY,
+          title: 'Room Inspection Approved',
+          message: `${roomLabel} inspection approved. Ready for check-in.`,
+          priority: NotificationPriority.NORMAL,
+          roomId: item.roomId,
+          metadata: { roomId: item.roomId, roomNumber: room?.room_number, taskId: item.id },
+        });
       } else if (newStatus === 'in-progress' || newStatus === 'in_progress') {
         await createNotification({
-          type: NotificationType.HOUSEKEEPING_TASK_ASSIGNED,
-          title: 'Housekeeping Assigned',
-          message: `Housekeeping task assigned${roomLabel ? ` for ${roomLabel}` : ''}${item.assignedTo ? ` to ${item.assignedTo}` : ''}`,
+          type: NotificationType.HOUSEKEEPING_TASK_UPDATED,
+          title: 'Housekeeping Cleaning In Progress',
+          message: `Housekeeping started turnaround cleaning for ${roomLabel}${item.assignedTo ? ` (${item.assignedTo})` : ''}`,
+          priority: NotificationPriority.NORMAL,
+          roomId: item.roomId,
+          metadata: { roomId: item.roomId, roomNumber: room?.room_number, taskId: item.id },
+        });
+      } else if (newStatus === 'pending' || newStatus === 'dirty') {
+        await createNotification({
+          type: NotificationType.ROOM_DIRTY,
+          title: 'Room Marked Dirty',
+          message: `${roomLabel} marked dirty – turnaround cleaning required`,
           priority: NotificationPriority.NORMAL,
           roomId: item.roomId,
           metadata: { roomId: item.roomId, roomNumber: room?.room_number, taskId: item.id },
@@ -142,6 +174,36 @@ export async function updateHousekeeping(req, res) {
       }
     } catch (notifErr) {
       console.error('[housekeepingController] update notification failed:', notifErr.message);
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+export async function deleteHousekeeping(req, res) {
+  try {
+    const id = Number(req.params.id);
+    const existing = await prisma.housekeeping.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ error: 'Housekeeping task not found' });
+    }
+
+    await prisma.housekeeping.delete({ where: { id } });
+    res.json({ success: true });
+
+    try {
+      const room = existing.roomId ? await prisma.room.findUnique({ where: { id: existing.roomId } }) : null;
+      const roomLabel = room ? `Room ${room.room_number}` : (existing.roomId ? `Room ${existing.roomId}` : 'Room');
+      await createNotification({
+        type: NotificationType.HOUSEKEEPING_TASK_DELETED,
+        title: 'Housekeeping Task Deleted',
+        message: `Housekeeping turnaround task for ${roomLabel} was deleted`,
+        priority: NotificationPriority.NORMAL,
+        roomId: existing.roomId,
+        metadata: { taskId: existing.id, roomNumber: room?.room_number },
+      });
+    } catch (notifErr) {
+      console.error('[housekeepingController] HOUSEKEEPING_TASK_DELETED notification failed:', notifErr.message);
     }
   } catch (err) {
     res.status(500).json({ error: err.message });

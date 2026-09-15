@@ -1,4 +1,5 @@
 import { prisma } from '../utils/db.js';
+import { createNotification, NotificationType, NotificationPriority } from '../utils/notificationService.js';
 
 function paginate(data, page, limit) {
   const total = data.length;
@@ -108,8 +109,28 @@ export async function updateGuest(req, res) {
 
 export async function deleteGuest(req, res) {
   try {
-    await prisma.guest.delete({ where: { id: Number(req.params.id) } });
+    const id = Number(req.params.id);
+    const existing = await prisma.guest.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ error: 'Guest not found' });
+    }
+
+    await prisma.guest.delete({ where: { id } });
     res.json({ success: true });
+
+    try {
+      const guestName = `${existing.firstName} ${existing.lastName || ''}`.trim();
+      await createNotification({
+        type: NotificationType.GUEST_DELETED,
+        title: 'Guest Profile Deleted',
+        message: `Guest profile for ${guestName} has been deleted`,
+        priority: NotificationPriority.NORMAL,
+        guestId: existing.id,
+        metadata: { guestId: existing.id, guestName },
+      });
+    } catch (notifErr) {
+      console.error('[guestController] GUEST_DELETED notification failed:', notifErr.message);
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -1,7 +1,12 @@
+import crypto from 'crypto';
 import { prisma } from '../utils/db.js';
 import { sendCheckInEmail } from '../utils/emailNotifier.js';
 import { broadcastRoomUpdate, broadcastApprovalUpdate } from '../utils/realtime.js';
 import { recordAuditLog, getUserPermissions, hasPermission } from '../services/rbacService.js';
+import { createNotification, NotificationType, NotificationPriority } from '../utils/notificationService.js';
+import { LockService } from '../lock/lock.service.js';
+
+const lockService = new LockService();
 
 function paginate(data, page, limit) {
   const total = data.length;
@@ -214,6 +219,25 @@ export async function createReservation(req, res) {
       }
     }
 
+    if (isCheckedInStatus) {
+      const roomNumber = targetRoomId ? `ROOM-${targetRoomId}` : 'ROOM-101';
+      const lockId = `LOCK-${roomNumber}-${crypto.randomBytes(8).toString('hex')}`;
+      const digitalPin = crypto.randomInt(100000, 1000000).toString();
+      const validFrom = new Date();
+      const validUntil = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+      const keyPayload = lockService.generateDigitalKeyPayload(String(reservation.id), lockId, validFrom, validUntil);
+      await prisma.reservation.update({
+        where: { id: reservation.id },
+        data: {
+          digitalPin,
+          digitalKey: JSON.stringify(keyPayload),
+          digitalKeyStatus: 'ACTIVE',
+          lockId,
+          verificationStatus: 'VERIFIED',
+        }
+      });
+    }
+
     if (isCheckedInStatus && Number(paidAmount) > 0) {
       const gName = reservation.guest ? `${reservation.guest.firstName} ${reservation.guest.lastName}`.trim() : 'Guest';
       await prisma.payment.create({
@@ -222,6 +246,7 @@ export async function createReservation(req, res) {
           amount: Number(paidAmount),
           method: req.body.paymentMethod || 'Credit Card',
           paymentStatus: 'Paid',
+          gatewayStatus: 'manual',
           notes: `Payment collected at check-in for ${gName} (Reservation #${reservation.id})`,
         }
       });
@@ -274,6 +299,25 @@ export async function createReservation(req, res) {
       }
     } else {
       emailDelivery = { success: false, emailSent: false, category: 'invalid-recipient', error: 'Guest email address is missing or invalid.' };
+    }
+
+    // Fire NEW_RESERVATION notification
+    try {
+      const room = targetRoomId ? await prisma.room.findUnique({ where: { id: targetRoomId } }) : null;
+      const guestName = reservation.guest ? `${reservation.guest.firstName} ${reservation.guest.lastName}`.trim() : (firstName ? `${firstName} ${lastName}`.trim() : 'Guest');
+      const roomLabel = room ? `Room ${room.room_number}` : (targetRoomId ? `Room ${targetRoomId}` : '');
+      await createNotification({
+        type: NotificationType.NEW_RESERVATION,
+        title: 'New Reservation Booked',
+        message: `Reservation #${reservation.id} booked for ${guestName}${roomLabel ? ` in ${roomLabel}` : ''}`,
+        priority: NotificationPriority.NORMAL,
+        roomId: targetRoomId,
+        guestId: reservation.guestId,
+        reservationId: reservation.id,
+        metadata: { reservationId: reservation.id, roomId: targetRoomId, guestName, roomNumber: room?.room_number },
+      });
+    } catch (notifErr) {
+      console.error('[reservationController] NEW_RESERVATION notification failed:', notifErr.message);
     }
 
     res.status(201).json({ ...reservation, emailDelivery });
@@ -369,6 +413,19 @@ export async function updateReservation(req, res) {
 
     if (updateData.status === 'checked_out') {
       updateData.digitalKeyStatus = 'EXPIRED';
+    } else if (updateData.status === 'checked_in') {
+      if (!currentRes?.digitalPin || !currentRes?.digitalKey || currentRes?.digitalKeyStatus !== 'ACTIVE') {
+        const roomNumber = (updateData.roomId || currentRes?.roomId) ? `ROOM-${updateData.roomId || currentRes.roomId}` : 'ROOM-101';
+        const lockId = `LOCK-${roomNumber}-${crypto.randomBytes(8).toString('hex')}`;
+        const digitalPin = crypto.randomInt(100000, 1000000).toString();
+        const validFrom = new Date();
+        const validUntil = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+        const keyPayload = lockService.generateDigitalKeyPayload(String(currentRes?.id || req.params.id), lockId, validFrom, validUntil);
+        updateData.digitalPin = digitalPin;
+        updateData.digitalKey = JSON.stringify(keyPayload);
+        updateData.digitalKeyStatus = 'ACTIVE';
+        updateData.lockId = lockId;
+      }
     }
 
     const reservation = await prisma.reservation.update({
@@ -432,6 +489,62 @@ export async function updateReservation(req, res) {
           }
         });
       }
+    }
+
+    // Fire notification on status or reservation updates
+    try {
+      const room = reservation.roomId ? await prisma.room.findUnique({ where: { id: reservation.roomId } }) : null;
+      const guestName = reservation.guest ? `${reservation.guest.firstName} ${reservation.guest.lastName}`.trim() : 'Guest';
+      const roomLabel = room ? `Room ${room.room_number}` : (reservation.roomId ? `Room ${reservation.roomId}` : '');
+      const st = (updateData.status || '').toLowerCase();
+
+      if (st === 'checked_in') {
+        await createNotification({
+          type: NotificationType.GUEST_CHECKED_IN,
+          title: 'Guest Checked In',
+          message: `${guestName} checked in to ${roomLabel} (Reservation #${reservation.id})`,
+          priority: NotificationPriority.NORMAL,
+          roomId: reservation.roomId,
+          guestId: reservation.guestId,
+          reservationId: reservation.id,
+          metadata: { reservationId: reservation.id, roomId: reservation.roomId, guestName, roomNumber: room?.room_number },
+        });
+      } else if (st === 'checked_out') {
+        await createNotification({
+          type: NotificationType.GUEST_CHECKED_OUT,
+          title: 'Guest Checked Out',
+          message: `${guestName} checked out of ${roomLabel} (Reservation #${reservation.id})`,
+          priority: NotificationPriority.NORMAL,
+          roomId: reservation.roomId,
+          guestId: reservation.guestId,
+          reservationId: reservation.id,
+          metadata: { reservationId: reservation.id, roomId: reservation.roomId, guestName, roomNumber: room?.room_number },
+        });
+      } else if (st === 'cancelled') {
+        await createNotification({
+          type: NotificationType.RESERVATION_CANCELLED,
+          title: 'Reservation Cancelled',
+          message: `Reservation #${reservation.id} for ${guestName} was cancelled`,
+          priority: NotificationPriority.HIGH,
+          roomId: reservation.roomId,
+          guestId: reservation.guestId,
+          reservationId: reservation.id,
+          metadata: { reservationId: reservation.id, roomId: reservation.roomId, guestName, roomNumber: room?.room_number },
+        });
+      } else if (updateData.status) {
+        await createNotification({
+          type: NotificationType.RESERVATION_UPDATED,
+          title: 'Reservation Status Updated',
+          message: `Reservation #${reservation.id} for ${guestName} status set to ${updateData.status}`,
+          priority: NotificationPriority.NORMAL,
+          roomId: reservation.roomId,
+          guestId: reservation.guestId,
+          reservationId: reservation.id,
+          metadata: { reservationId: reservation.id, roomId: reservation.roomId, guestName, roomNumber: room?.room_number },
+        });
+      }
+    } catch (notifErr) {
+      console.error('[reservationController] update notification failed:', notifErr.message);
     }
 
     res.json(reservation);
@@ -549,6 +662,25 @@ export async function cancelReservation(req, res) {
       ipAddress: req.ip,
     });
 
+    // Fire notification for direct cancellation
+    try {
+      const guestName = updated.guest ? `${updated.guest.firstName} ${updated.guest.lastName}`.trim() : 'Guest';
+      const room = updated.roomId ? await prisma.room.findUnique({ where: { id: updated.roomId } }) : null;
+      const roomLabel = room ? `Room ${room.room_number}` : (updated.roomId ? `Room ${updated.roomId}` : '');
+      await createNotification({
+        type: NotificationType.RESERVATION_CANCELLED,
+        title: 'Reservation Cancelled',
+        message: `Reservation #${reservationId} for ${guestName}${roomLabel ? ` (${roomLabel})` : ''} was cancelled. Reason: ${reason || 'Direct cancellation'}`,
+        priority: NotificationPriority.HIGH,
+        roomId: updated.roomId,
+        guestId: updated.guestId,
+        reservationId: updated.id,
+        metadata: { reservationId, roomId: updated.roomId, guestName, reason },
+      });
+    } catch (notifErr) {
+      console.error('[reservationController] cancel notification failed:', notifErr.message);
+    }
+
     return res.json({
       success: true,
       message: 'Reservation cancelled successfully',
@@ -565,7 +697,7 @@ export async function deleteReservation(req, res) {
     const reservationId = Number(req.params.id);
     const existing = await prisma.reservation.findUnique({
       where: { id: reservationId },
-      include: { guest: true },
+      include: { guest: true, room: true },
     });
 
     if (!existing) {
@@ -583,6 +715,24 @@ export async function deleteReservation(req, res) {
       details: `Deleted reservation #${reservationId} for guest ${existing.guest?.firstName || ''} ${existing.guest?.lastName || ''}`,
       ipAddress: req.ip,
     });
+
+    // Fire RESERVATION_DELETED notification
+    try {
+      const guestName = existing.guest ? `${existing.guest.firstName} ${existing.guest.lastName || ''}`.trim() : 'Guest';
+      const roomLabel = existing.room ? `Room ${existing.room.room_number}` : (existing.roomId ? `Room ${existing.roomId}` : '');
+      await createNotification({
+        type: NotificationType.RESERVATION_DELETED,
+        title: 'Reservation Deleted',
+        message: `Reservation #${existing.bookingNumber || reservationId} for ${guestName}${roomLabel ? ` (${roomLabel})` : ''} was deleted`,
+        priority: NotificationPriority.HIGH,
+        roomId: existing.roomId,
+        guestId: existing.guestId,
+        reservationId: existing.id,
+        metadata: { reservationId: existing.id, guestName, roomNumber: existing.room?.room_number },
+      });
+    } catch (notifErr) {
+      console.error('[reservationController] RESERVATION_DELETED notification failed:', notifErr.message);
+    }
 
     res.json({ success: true, message: 'Reservation deleted successfully' });
   } catch (err) {

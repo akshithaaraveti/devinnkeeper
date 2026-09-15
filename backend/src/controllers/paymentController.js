@@ -127,8 +127,26 @@ export async function updatePayment(req, res) {
 
 export async function deletePayment(req, res) {
   try {
-    await prisma.payment.delete({ where: { id: Number(req.params.id) } });
+    const id = Number(req.params.id);
+    const existing = await prisma.payment.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ error: 'Payment not found' });
+    }
+
+    await prisma.payment.delete({ where: { id } });
     res.json({ success: true });
+
+    try {
+      await createNotification({
+        type: NotificationType.PAYMENT_DELETED,
+        title: 'Payment Record Deleted',
+        message: `Payment record #${existing.id} of ₹${existing.amount || 0} (${existing.method || 'Payment'}) was deleted`,
+        priority: NotificationPriority.HIGH,
+        metadata: { paymentId: existing.id, amount: existing.amount, method: existing.method },
+      });
+    } catch (notifErr) {
+      console.error('[paymentController] PAYMENT_DELETED notification failed:', notifErr.message);
+    }
   } catch (err) {
     res.status(500).json({ error: 'An internal error occurred while processing your request.' });
   }

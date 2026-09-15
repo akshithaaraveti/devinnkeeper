@@ -1,5 +1,6 @@
 import { prisma } from '../utils/db.js';
 import { recordAuditLog } from '../services/rbacService.js';
+import { createNotification, NotificationType, NotificationPriority } from '../utils/notificationService.js';
 
 export async function getExpenses(req, res) {
   try {
@@ -100,6 +101,18 @@ export async function deleteExpense(req, res) {
     });
 
     res.json({ success: true, message: 'Expense deleted successfully' });
+
+    try {
+      await createNotification({
+        type: NotificationType.EXPENSE_DELETED,
+        title: 'Expense Deleted',
+        message: `Expense #${id} (${expense.title} - ₹${expense.amount}) was deleted`,
+        priority: NotificationPriority.NORMAL,
+        metadata: { expenseId: expense.id, title: expense.title, amount: expense.amount },
+      });
+    } catch (notifErr) {
+      console.error('[expenseController] EXPENSE_DELETED notification failed:', notifErr.message);
+    }
   } catch (error) {
     console.error('Error deleting expense:', error);
     res.status(500).json({ success: false, message: 'Failed to delete expense' });

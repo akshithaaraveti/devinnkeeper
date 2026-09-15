@@ -16,13 +16,26 @@ import {
   Smartphone,
   BedDouble,
   ChevronRight,
-  Download
+  Download,
+  CreditCard,
+  Banknote,
+  AlertTriangle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useTheme } from "@/contexts/ThemeContext";
+
+import { useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 
 // Sample Available Rooms List for Selection
 const AVAILABLE_ROOMS = [
@@ -62,24 +75,60 @@ declare global {
 
 let razorpayScriptPromise: Promise<void> | null = null;
 
-function loadRazorpayScript() {
-  if (window.Razorpay) return Promise.resolve();
+function loadRazorpayScript(): Promise<void> {
+  if (typeof window !== "undefined" && window.Razorpay) {
+    return Promise.resolve();
+  }
   if (razorpayScriptPromise) return razorpayScriptPromise;
 
-  razorpayScriptPromise = new Promise((resolve, reject) => {
+  razorpayScriptPromise = new Promise<void>((resolve, reject) => {
+    if (typeof window !== "undefined" && window.Razorpay) {
+      resolve();
+      return;
+    }
+
+    // Check if script tag is already present in DOM
+    const existing = document.querySelector('script[src*="checkout.razorpay.com"]') as HTMLScriptElement | null;
+    if (existing) {
+      let pollCount = 0;
+      const interval = setInterval(() => {
+        pollCount++;
+        if (window.Razorpay) {
+          clearInterval(interval);
+          resolve();
+        } else if (pollCount > 25) { // 2.5s timeout
+          clearInterval(interval);
+          razorpayScriptPromise = null;
+          reject(new Error("Unable to load Razorpay Checkout (blocked by ad-blocker or network error)."));
+        }
+      }, 100);
+      return;
+    }
+
     const script = document.createElement("script");
     script.src = "https://checkout.razorpay.com/v1/checkout.js";
     script.async = true;
-    script.onload = () => window.Razorpay ? resolve() : reject(new Error("Razorpay Checkout is unavailable"));
-    script.onerror = () => reject(new Error("Unable to load Razorpay Checkout"));
+    script.crossOrigin = "anonymous";
+    script.onload = () => {
+      if (window.Razorpay) {
+        resolve();
+      } else {
+        razorpayScriptPromise = null;
+        reject(new Error("Razorpay Checkout is unavailable in this browser."));
+      }
+    };
+    script.onerror = () => {
+      razorpayScriptPromise = null;
+      try {
+        script.remove();
+      } catch (_) {}
+      reject(new Error("Unable to load Razorpay Checkout. Please disable ad-blockers or use front-desk Cash/Card."));
+    };
     document.body.appendChild(script);
   });
 
   return razorpayScriptPromise;
 }
-
-import { useQueryClient } from "@tanstack/react-query";
-import { useTranslation } from "react-i18next";
 
 export default function CheckInVerification() {
   const { t } = useTranslation();
@@ -124,6 +173,7 @@ export default function CheckInVerification() {
   // Step flow for reserved guests: 1 = ID Verification, 2 = Payment Process, 3 = Digital Key Pass
   const [step, setStep] = useState<number>(1);
   const [paymentDone, setPaymentDone] = useState<boolean>(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
   const [sendingReminder, setSendingReminder] = useState<boolean>(false);
 
   // Send 3-Hour Prior Check-in Reminder Notification
@@ -252,7 +302,30 @@ export default function CheckInVerification() {
           (p: any) => (p.paymentStatus || p.status || '').toLowerCase() === 'paid'
         ));
 
-    if (isSelectedGuestCheckedIn || (selectedReservation?.verificationStatus === 'VERIFIED' && hasPaid)) {
+    if (isSelectedGuestCheckedIn) {
+      setStep(3);
+      if (selectedReservation.digitalPin && selectedReservation.lockId) {
+        let payload = null;
+        try {
+          payload = selectedReservation.digitalKey ? JSON.parse(selectedReservation.digitalKey) : null;
+        } catch (e) {}
+        const details = {
+          digitalPin: selectedReservation.digitalPin,
+          lockId: selectedReservation.lockId,
+          keyPayload: payload,
+        };
+        setKeyDetails(details);
+        setDigitalKeyGenerated(true);
+        setCheckInCompletedAnimation(true);
+        sessionStorage.setItem("digitalKeyData", JSON.stringify({
+          reservation: selectedReservation,
+          keyDetails: details,
+        }));
+      } else {
+        setCheckInCompletedAnimation(true);
+        setDigitalKeyGenerated(false);
+      }
+    } else if (selectedReservation?.verificationStatus === 'VERIFIED' && hasPaid) {
       setStep(3);
     } else if (selectedReservation?.verificationStatus === 'VERIFIED') {
       setStep(2);
@@ -268,77 +341,85 @@ export default function CheckInVerification() {
 
     return new Promise<void>(async (resolve) => {
       try {
-      await loadRazorpayScript();
-      if (!window.Razorpay) throw new Error("Razorpay Checkout is unavailable");
+        await loadRazorpayScript();
+        if (!window.Razorpay) throw new Error("Razorpay Checkout is unavailable in this browser.");
 
-      let finished = false;
-      let verificationStarted = false;
-      const finish = async (success: boolean, message?: string) => {
-        if (finished) return;
-        finished = true;
-        try {
-          if (success) await onVerified();
-          else toast.error(message || "Payment was not completed.");
-        } finally {
-          resolve();
-        }
-      };
-
-      const razorpay = new window.Razorpay({
-        key: checkout.keyId,
-        amount: Number(checkout.amount),
-        currency: checkout.currency,
-        order_id: checkout.orderId,
-        name: "InnKeeper",
-        description: "Reservation payment",
-        prefill: {
-          name: guest ? `${guest.firstName || ""} ${guest.lastName || ""}`.trim() : undefined,
-          email: guest?.email || undefined,
-          contact: guest?.phone || undefined,
-        },
-        handler: async (response) => {
-          verificationStarted = true;
-          const orderId = response.razorpay_order_id || (response as any).razorpayOrderId;
-          const paymentId = response.razorpay_payment_id || (response as any).razorpayPaymentId;
-          const signature = response.razorpay_signature || (response as any).razorpaySignature;
-
-          if (!orderId || !paymentId || !signature) {
-            await finish(false, "Razorpay returned an invalid payment response.");
-            return;
-          }
-
+        let finished = false;
+        let verificationStarted = false;
+        const finish = async (success: boolean, message?: string) => {
+          if (finished) return;
+          finished = true;
           try {
-            const verifyResponse = await api.post("/checkin/payment/verify", {
-              reservationId: paymentData.reservation?.id,
-              razorpayOrderId: orderId,
-              razorpayPaymentId: paymentId,
-              razorpaySignature: signature,
-              razorpay_order_id: orderId,
-              razorpay_payment_id: paymentId,
-              razorpay_signature: signature,
-            });
-            const verifyData = verifyResponse.data;
-            if (!verifyData?.success || verifyData.status !== "Paid") {
-              await finish(false, verifyData?.error || "Payment verification failed.");
+            if (success) {
+              setPaymentError(null);
+              await onVerified();
+            } else {
+              toast.error(message || "Payment was not completed.");
+            }
+          } finally {
+            resolve();
+          }
+        };
+
+        const razorpay = new window.Razorpay({
+          key: checkout.keyId,
+          amount: Number(checkout.amount),
+          currency: checkout.currency,
+          order_id: checkout.orderId,
+          name: "InnKeeper",
+          description: "Reservation payment",
+          prefill: {
+            name: guest ? `${guest.firstName || ""} ${guest.lastName || ""}`.trim() : undefined,
+            email: guest?.email || undefined,
+            contact: guest?.phone || undefined,
+          },
+          handler: async (response) => {
+            verificationStarted = true;
+            const orderId = response.razorpay_order_id || (response as any).razorpayOrderId;
+            const paymentId = response.razorpay_payment_id || (response as any).razorpayPaymentId;
+            const signature = response.razorpay_signature || (response as any).razorpaySignature;
+
+            if (!orderId || !paymentId || !signature) {
+              await finish(false, "Razorpay returned an invalid payment response.");
               return;
             }
-            await finish(true);
-          } catch (err: any) {
-            await finish(false, err?.response?.data?.error || "Network error while verifying payment.");
-          }
-        },
-        modal: { ondismiss: () => {
-          if (!verificationStarted) void finish(false, "Payment window closed. No payment was recorded.");
-        } },
-      });
 
-      razorpay.on("payment.failed", () => {
-        verificationStarted = true;
-        void finish(false, "Razorpay reported that the payment failed.");
-      });
-      razorpay.open();
+            try {
+              const verifyResponse = await api.post("/checkin/payment/verify", {
+                reservationId: paymentData.reservation?.id,
+                razorpayOrderId: orderId,
+                razorpayPaymentId: paymentId,
+                razorpaySignature: signature,
+                razorpay_order_id: orderId,
+                razorpay_payment_id: paymentId,
+                razorpay_signature: signature,
+              });
+              const verifyData = verifyResponse.data;
+              if (!verifyData?.success || verifyData.status !== "Paid") {
+                await finish(false, verifyData?.error || "Payment verification failed.");
+                return;
+              }
+              await finish(true);
+            } catch (err: any) {
+              await finish(false, err?.response?.data?.error || "Network error while verifying payment.");
+            }
+          },
+          modal: {
+            ondismiss: () => {
+              if (!verificationStarted) void finish(false, "Payment window closed. No payment was recorded.");
+            }
+          },
+        });
+
+        razorpay.on("payment.failed", () => {
+          verificationStarted = true;
+          void finish(false, "Razorpay reported that the payment failed.");
+        });
+        razorpay.open();
       } catch (error: any) {
-        toast.error(error?.message || "Unable to open Razorpay Checkout.");
+        const errorMsg = error?.message || "Unable to open Razorpay Checkout.";
+        setPaymentError(errorMsg);
+        toast.error("Unable to load Razorpay Checkout. You can record payment using Front-Desk Cash or Card below.");
         resolve();
       }
     });
@@ -515,14 +596,15 @@ export default function CheckInVerification() {
   };
 
   // Handle Step 2: Create and verify a Razorpay payment
-  const handleCompletePaymentProcess = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCompletePaymentProcess = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!selectedResId) {
       toast.error("Please select a reservation first");
       return;
     }
 
     setSubmittingBooking(true);
+    setPaymentError(null);
     try {
       const res = await api.post("/checkin/process-payment", {
         reservationId: selectedResId,
@@ -530,26 +612,30 @@ export default function CheckInVerification() {
 
       const data = res.data;
       if (!data.success) {
+        setPaymentError(data.error || "Unable to create payment order.");
         toast.error(data.error || "Unable to create payment order.");
         return;
       }
 
       await openRazorpayCheckout(data, selectedReservation?.guest, async () => {
         setPaymentDone(true);
+        setPaymentError(null);
         qc.invalidateQueries({ queryKey: ["payments"] });
         qc.invalidateQueries({ queryKey: ["reservations"] });
         toast.success("Payment verified successfully. You can now complete check-in.");
         setStep(3);
       });
     } catch (err: any) {
-      toast.error(err?.response?.data?.error || "Network error while creating payment order.");
+      const msg = err?.response?.data?.error || "Network error while creating payment order.";
+      setPaymentError(msg);
+      toast.error(msg);
     } finally {
       setSubmittingBooking(false);
     }
   };
 
-  // Front-desk alternative to Razorpay: record a cash/card payment collected in person.
-  const handleManualPayment = async (method: "Cash" | "Card") => {
+  // Front-desk alternative to Razorpay: record a cash/card/manual payment collected in person or externally.
+  const handleManualPayment = async (method: "Cash" | "Card" | "Razorpay") => {
     if (!selectedResId) {
       toast.error("Please select a reservation first");
       return;
@@ -563,9 +649,10 @@ export default function CheckInVerification() {
         return;
       }
       setPaymentDone(true);
+      setPaymentError(null);
       qc.invalidateQueries({ queryKey: ["payments"] });
       qc.invalidateQueries({ queryKey: ["reservations"] });
-      toast.success(data.message || "Payment recorded. You can now complete check-in.");
+      toast.success(data.message || `Payment (${method}) recorded. You can now complete check-in.`);
       setStep(3);
     } catch (err: any) {
       toast.error(err?.response?.data?.error || "Network error while recording payment.");
@@ -594,10 +681,15 @@ export default function CheckInVerification() {
         toast.error("The server did not return a valid digital key.");
         return;
       }
+      const details = { digitalPin: data.digitalPin, lockId: data.lockId, keyPayload: data.keyPayload };
       setStep(3);
       setCheckInCompletedAnimation(true);
-      setKeyDetails({ digitalPin: data.digitalPin, lockId: data.lockId, keyPayload: data.keyPayload });
+      setKeyDetails(details);
       setDigitalKeyGenerated(true);
+      sessionStorage.setItem("digitalKeyData", JSON.stringify({
+        reservation: data.reservation || selectedReservation,
+        keyDetails: details,
+      }));
       toast.success("Check-in completed successfully!");
 
       qc.invalidateQueries({ queryKey: ["reservations"] });
@@ -627,8 +719,13 @@ export default function CheckInVerification() {
         throw new Error(data.error || "The server did not return a valid digital key.");
       }
 
-      setKeyDetails({ digitalPin: data.digitalPin, lockId: data.lockId, keyPayload: data.keyPayload });
+      const details = { digitalPin: data.digitalPin, lockId: data.lockId, keyPayload: data.keyPayload };
+      setKeyDetails(details);
       setDigitalKeyGenerated(true);
+      sessionStorage.setItem("digitalKeyData", JSON.stringify({
+        reservation: data.reservation || selectedReservation,
+        keyDetails: details,
+      }));
       toast.success("Digital Room Key & Access PIN generated!");
 
       if (data.success) {
@@ -724,10 +821,10 @@ export default function CheckInVerification() {
             <p className="text-xs text-muted-foreground mt-0.5">{t("checkin.selectCandidateSub")}</p>
           </div>
           <div className="flex items-center gap-2 w-full sm:w-auto">
-            <select
-              value={selectedResId}
-              onChange={(e) => {
-                const targetId = e.target.value;
+            <Select
+              value={selectedResId || undefined}
+              onValueChange={(val) => {
+                const targetId = val === "none" ? "" : val;
                 setSelectedResId(targetId);
                 const target = reservations.find((r) => String(r.id) === String(targetId));
                 const isTargetCheckedIn = Boolean(target && (target.status || '').toLowerCase().includes('check'));
@@ -745,39 +842,49 @@ export default function CheckInVerification() {
                 setCheckInCompletedAnimation(false);
                 setDigitalKeyGenerated(false);
               }}
-              className="bg-card border-2 border-[#B89572]/60 rounded-xl px-4 py-3 text-xs font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-[#8B6748] w-full sm:w-80 shadow-md"
             >
-              <option value="">{t("checkin.chooseCandidatePlaceholder")}</option>
-              {reservations.map((r) => {
-                const name = r.guest ? `${r.guest.firstName} ${r.guest.lastName}` : `Guest #${r.guestId || r.id}`;
-                const resCode = `RES-${String(r.id).padStart(4, '0')}`;
-                const roomNum = r.roomNumber || r.room?.room_number || r.room?.number || r.roomId || "—";
-                const isIdDone = r.verificationStatus === "VERIFIED" || Boolean(r.dlImageUrl);
-                const statusLower = (r.status || '').toLowerCase();
-                const isCheckedIn = statusLower.includes('check');
-                const isCancelled = statusLower === 'cancelled';
-                const isCancellationRequested = statusLower === 'cancellation_requested';
+              <SelectTrigger className="bg-card border-2 border-[#B89572]/60 rounded-xl px-4 py-3 h-auto text-xs font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-[#8B6748] w-full sm:w-80 shadow-md cursor-pointer">
+                <SelectValue placeholder={t("checkin.chooseCandidatePlaceholder")} />
+              </SelectTrigger>
+              <SelectContent className="bg-card border-2 border-[#B89572]/40 rounded-xl shadow-2xl max-h-80 w-[var(--radix-select-trigger-width)] z-[100] p-1.5">
+                <SelectItem value="none" className="text-xs font-medium text-muted-foreground cursor-pointer rounded-lg py-2 px-3 data-[highlighted]:bg-primary/10 data-[highlighted]:text-primary">
+                  {t("checkin.chooseCandidatePlaceholder")}
+                </SelectItem>
+                {reservations.map((r) => {
+                  const name = r.guest ? `${r.guest.firstName} ${r.guest.lastName}` : `Guest #${r.guestId || r.id}`;
+                  const resCode = `RES-${String(r.id).padStart(4, '0')}`;
+                  const roomNum = r.roomNumber || r.room?.room_number || r.room?.number || r.roomId || "—";
+                  const isIdDone = r.verificationStatus === "VERIFIED" || Boolean(r.dlImageUrl);
+                  const statusLower = (r.status || '').toLowerCase();
+                  const isCheckedIn = statusLower.includes('check');
+                  const isCancelled = statusLower === 'cancelled';
+                  const isCancellationRequested = statusLower === 'cancellation_requested';
 
-                let tag = t("checkin.pendingId", "Pending ID");
-                if (isCheckedIn) {
-                  tag = t("reservations.checkedIn", "Checked In");
-                } else if (isCancelled) {
-                  tag = t("reservations.cancelled", "Cancelled");
-                } else if (isCancellationRequested) {
-                  tag = t("reservations.cancellationRequested", "Cancellation Requested");
-                } else if (isIdDone) {
-                  tag = t("checkin.identityVerified", "Identity Verified");
-                }
+                  let tag = t("checkin.pendingId", "Pending ID");
+                  if (isCheckedIn) {
+                    tag = t("reservations.checkedIn", "Checked In");
+                  } else if (isCancelled) {
+                    tag = t("reservations.cancelled", "Cancelled");
+                  } else if (isCancellationRequested) {
+                    tag = t("reservations.cancellationRequested", "Cancellation Requested");
+                  } else if (isIdDone) {
+                    tag = t("checkin.identityVerified", "Identity Verified");
+                  }
 
-                const roomLabel = roomNum !== "—" ? t("roomDrawer.roomNumber", { number: roomNum }) : "—";
+                  const roomLabel = roomNum !== "—" ? t("roomDrawer.roomNumber", { number: roomNum }) : "—";
 
-                return (
-                  <option key={r.id} value={String(r.id)}>
-                    {resCode} - {name} ({roomLabel}) [{tag}]
-                  </option>
-                );
-              })}
-            </select>
+                  return (
+                    <SelectItem
+                      key={r.id}
+                      value={String(r.id)}
+                      className="text-xs font-semibold cursor-pointer rounded-lg py-2.5 px-3 data-[highlighted]:bg-primary/15 data-[highlighted]:text-primary focus:bg-primary/15 focus:text-primary transition-colors"
+                    >
+                      {resCode} - {name} ({roomLabel}) [{tag}]
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -1087,11 +1194,12 @@ export default function CheckInVerification() {
 
       {/* STEP 2: Payment Process */}
       {step === 2 && selectedReservation && (
-        <div className="w-full max-w-lg mx-auto bg-card rounded-3xl border border-border p-4 sm:p-6 shadow-xl space-y-5">
+        <div className="w-full max-w-lg mx-auto bg-card rounded-3xl border border-border p-4 sm:p-6 shadow-xl space-y-5 animate-in fade-in duration-300">
           <div className="flex justify-between items-center pb-1">
             <div>
-              <p className="text-xs font-medium text-muted-foreground">
-                Complete the reservation payment securely through Razorpay Checkout.
+              <h3 className="text-sm font-bold text-foreground">Step 2: Collect Reservation Payment</h3>
+              <p className="text-xs font-medium text-muted-foreground mt-0.5">
+                Complete securely via Razorpay Checkout or choose front-desk payment.
               </p>
             </div>
             <Button variant="ghost" size="sm" onClick={() => setStep(1)} className="rounded-xl text-xs">
@@ -1124,15 +1232,56 @@ export default function CheckInVerification() {
               );
             })()}
 
-            <div className="rounded-xl border border-dashed border-border bg-accent/20 p-4 text-xs text-muted-foreground">
-              Razorpay Checkout securely collects payment details. No card information is stored by InnKeeper.
+            {/* Error / Ad-blocker notification banner */}
+            {paymentError && (
+              <div className="rounded-2xl border border-amber-300/80 bg-amber-50/90 dark:bg-amber-950/40 p-4 text-xs text-amber-950 dark:text-amber-200 space-y-2.5">
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-bold">Gateway Connection Notice</p>
+                    <p className="text-muted-foreground leading-relaxed">
+                      {paymentError.includes("Unable to load")
+                        ? "Razorpay Checkout script was blocked from loading. This usually happens if an ad-blocker (uBlock, Brave Shields) or firewall is active."
+                        : paymentError}
+                    </p>
+                    <p className="font-semibold text-foreground pt-0.5">
+                      You can retry Razorpay or proceed immediately with Front-Desk options below:
+                    </p>
+                  </div>
+                </div>
+                <div className="pt-1 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleCompletePaymentProcess()}
+                    disabled={submittingBooking}
+                    className="h-8 rounded-xl text-xs border-amber-300 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/40"
+                  >
+                    <RefreshCw className="w-3 h-3 mr-1.5" /> Retry Razorpay
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => handleManualPayment("Razorpay")}
+                    disabled={submittingBooking}
+                    className="h-8 rounded-xl text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" /> Confirm Payment & Proceed
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <div className="rounded-xl border border-dashed border-border bg-accent/20 p-3.5 text-xs text-muted-foreground">
+              Razorpay Checkout securely collects card, UPI, and net banking payments.
             </div>
 
             {/* Authorize Payment Action Button */}
             <Button
               type="submit"
               disabled={submittingBooking}
-              className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-sm font-extrabold shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 mt-2"
+              className="w-full h-12 bg-[#8B6748] hover:bg-[#755438] text-white rounded-2xl text-sm font-extrabold shadow-lg shadow-[#8B6748]/25 flex items-center justify-center gap-2 mt-2 cursor-pointer transition-all active:scale-[0.99]"
             >
               {submittingBooking ? (
                 <>
@@ -1142,8 +1291,53 @@ export default function CheckInVerification() {
                 <>Pay with Razorpay <ChevronRight className="w-4 h-4" /></>
               )}
             </Button>
-
           </form>
+
+          {/* Front Desk Alternative Payment Options */}
+          <div className="pt-2 space-y-3">
+            <div className="relative flex py-1 items-center">
+              <div className="flex-grow border-t border-border"></div>
+              <span className="flex-shrink mx-3 text-[11px] uppercase tracking-wider text-muted-foreground font-bold">
+                Or Front-Desk Payment
+              </span>
+              <div className="flex-grow border-t border-border"></div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={submittingBooking}
+                onClick={() => handleManualPayment("Cash")}
+                className="h-11 rounded-2xl text-xs font-bold border-border bg-card hover:bg-emerald-50 dark:hover:bg-emerald-950/20 hover:text-emerald-700 dark:hover:text-emerald-400 hover:border-emerald-300 flex items-center justify-center gap-2 transition-all cursor-pointer"
+              >
+                <Banknote className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                Pay with Cash
+              </Button>
+
+              <Button
+                type="button"
+                variant="outline"
+                disabled={submittingBooking}
+                onClick={() => handleManualPayment("Card")}
+                className="h-11 rounded-2xl text-xs font-bold border-border bg-card hover:bg-blue-50 dark:hover:bg-blue-950/20 hover:text-blue-700 dark:hover:text-blue-400 hover:border-blue-300 flex items-center justify-center gap-2 transition-all cursor-pointer"
+              >
+                <CreditCard className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                Card at Desk (POS)
+              </Button>
+            </div>
+
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={submittingBooking}
+              onClick={() => handleManualPayment("Razorpay")}
+              className="w-full h-9 rounded-xl text-xs text-muted-foreground hover:text-foreground flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              Direct Verification (Guest paid via QR / Link)
+            </Button>
+          </div>
         </div>
       )}
 
@@ -1457,7 +1651,7 @@ Thank you for staying with InnKeeper Motels!
                         <Button
                           onClick={handleSimulateUnlock}
                           disabled={unlocking}
-                          className="bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs font-extrabold px-8 py-3.5 gap-2 shadow-lg shadow-blue-500/25 cursor-pointer"
+                          className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-2xl text-xs font-extrabold px-8 py-3.5 gap-2 shadow-lg shadow-primary/25 cursor-pointer"
                         >
                           {unlocking ? (
                             <>

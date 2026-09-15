@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { createNotification, NotificationType, NotificationPriority } from '../utils/notificationService.js';
 const prisma = new PrismaClient();
 
 function paginate(data, page, limit) {
@@ -62,8 +63,26 @@ export async function updateCashLedger(req, res) {
 
 export async function deleteCashLedger(req, res) {
   try {
-    await prisma.cashLedger.delete({ where: { id: Number(req.params.id) } });
+    const id = Number(req.params.id);
+    const existing = await prisma.cashLedger.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ error: 'Cash ledger record not found' });
+    }
+
+    await prisma.cashLedger.delete({ where: { id } });
     res.json({ success: true });
+
+    try {
+      await createNotification({
+        type: NotificationType.CASH_LEDGER_DELETED,
+        title: 'Cash Ledger Entry Deleted',
+        message: `Cash ledger shift #${existing.id} for ${existing.employeeName} was deleted`,
+        priority: NotificationPriority.HIGH,
+        metadata: { ledgerId: existing.id, employeeName: existing.employeeName },
+      });
+    } catch (notifErr) {
+      console.error('[cashLedgerController] CASH_LEDGER_DELETED notification failed:', notifErr.message);
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

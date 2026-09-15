@@ -1,6 +1,7 @@
 import { prisma } from '../utils/db.js';
 import { recordAuditLog, getUserPermissions, hasPermission } from '../services/rbacService.js';
 import { broadcastRoomUpdate, broadcastApprovalUpdate } from '../utils/realtime.js';
+import { createNotification, NotificationType, NotificationPriority } from '../utils/notificationService.js';
 
 export async function listApprovalRequests(req, res) {
   try {
@@ -172,14 +173,15 @@ export async function reviewApprovalRequest(req, res) {
           }
 
           // Create notification for staff/admin
-          await prisma.appNotification.create({
-            data: {
-              type: 'cancellation',
-              title: 'Cancellation Approved',
-              message: `${reviewerName} approved cancellation for Reservation #${resId}. Room has been released.`,
-              isRead: false,
-            },
-          }).catch(() => {});
+          await createNotification({
+            type: NotificationType.RESERVATION_CANCELLED,
+            title: 'Cancellation Approved',
+            message: `${reviewerName} approved cancellation for Reservation #${resId}. Room has been released.`,
+            priority: NotificationPriority.HIGH,
+            reservationId: resId,
+            roomId: resv.roomId || null,
+            metadata: { reservationId: resId, roomId: resv.roomId, reviewer: reviewerName },
+          });
         } else {
           // If rejected, revert status back to confirmed
           await prisma.reservation.update({
@@ -188,14 +190,14 @@ export async function reviewApprovalRequest(req, res) {
           });
 
           // Create notification for staff/admin
-          await prisma.appNotification.create({
-            data: {
-              type: 'cancellation',
-              title: 'Cancellation Rejected',
-              message: `${reviewerName} rejected cancellation for Reservation #${resId}. Reservation remains confirmed.`,
-              isRead: false,
-            },
-          }).catch(() => {});
+          await createNotification({
+            type: NotificationType.RESERVATION_UPDATED,
+            title: 'Cancellation Rejected',
+            message: `${reviewerName} rejected cancellation for Reservation #${resId}. Reservation remains confirmed.`,
+            priority: NotificationPriority.NORMAL,
+            reservationId: resId,
+            metadata: { reservationId: resId, reviewer: reviewerName },
+          });
         }
 
         // Broadcast real-time approval review update

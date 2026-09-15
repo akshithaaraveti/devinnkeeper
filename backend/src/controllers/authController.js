@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import { z } from 'zod';
 import { sendPasswordResetEmail } from '../utils/email.js';
 import { normalizeRoleName } from '../services/rbacService.js';
+import { verifyJwtToken } from '../middleware/authMiddleware.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'innkeeper-super-secret-key-change-in-production';
 const JWT_EXPIRES_IN = '7d';
@@ -145,7 +146,7 @@ export async function me(req, res) {
       return res.status(401).json({ error: 'Not authenticated.' });
     }
 
-    const payload = jwt.verify(token, JWT_SECRET);
+    const payload = verifyJwtToken(token);
 
     const user = await prisma.user.findUnique({ where: { id: Number(payload.id) } });
     if (!user) {

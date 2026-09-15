@@ -84,11 +84,15 @@ import { listPayments, getPayment, createPayment, updatePayment, deletePayment }
 import { listVehicles, getVehicle, createVehicle, updateVehicle, deleteVehicle } from '../controllers/vehicleController.js';
 import { listCashLedger, createCashLedger, updateCashLedger, deleteCashLedger } from '../controllers/cashLedgerController.js';
 import { listShiftAudits, createShiftAudit, updateShiftAudit, deleteShiftAudit } from '../controllers/shiftAuditController.js';
-import { listHousekeeping, createHousekeeping, updateHousekeeping } from '../controllers/housekeepingController.js';
-import { listMaintenance, createMaintenance, updateMaintenance } from '../controllers/maintenanceController.js';
+import { listHousekeeping, createHousekeeping, updateHousekeeping, deleteHousekeeping } from '../controllers/housekeepingController.js';
+import { listMaintenance, createMaintenance, updateMaintenance, deleteMaintenance } from '../controllers/maintenanceController.js';
 import {
   listNotifications,
+  getUnreadNotificationCount,
   createNotification,
+  markOneRead,
+  markAllRead,
+  deleteOneNotification,
   markRead,
   clearNotifications
 } from '../controllers/notificationController.js';
@@ -249,17 +253,24 @@ router.delete('/shift-audits/:id', authenticateToken, requirePermission('reports
 router.get('/housekeeping', authenticateToken, requirePermission('housekeeping.view'), listHousekeeping);
 router.post('/housekeeping', authenticateToken, requirePermission('housekeeping.manage'), createHousekeeping);
 router.put('/housekeeping/:id', authenticateToken, requirePermission('housekeeping.manage'), updateHousekeeping);
+router.delete('/housekeeping/:id', authenticateToken, requirePermission('housekeeping.manage'), deleteHousekeeping);
 
 // ─── Maintenance ───────────────────────────────────────────
 router.get('/maintenance', authenticateToken, requirePermission('maintenance.view'), listMaintenance);
 router.post('/maintenance', authenticateToken, requirePermission('maintenance.manage'), createMaintenance);
 router.put('/maintenance/:id', authenticateToken, requirePermission('maintenance.manage'), updateMaintenance);
+router.delete('/maintenance/:id', authenticateToken, requirePermission('maintenance.manage'), deleteMaintenance);
 
 // ─── Notifications ─────────────────────────────────────────
 router.get('/notifications', authenticateToken, listNotifications);
+router.get('/notifications/unread-count', authenticateToken, getUnreadNotificationCount);
 router.post('/notifications', authenticateToken, createNotification);
+router.patch('/notifications/:id/read', authenticateToken, markOneRead);
+router.post('/notifications/mark-all-read', authenticateToken, markAllRead);
+router.patch('/notifications/read-all', authenticateToken, markAllRead);
 router.post('/notifications/mark-read', authenticateToken, markRead);
 router.put('/notifications', authenticateToken, markRead);
+router.delete('/notifications/:id', authenticateToken, deleteOneNotification);
 router.delete('/notifications', authenticateToken, clearNotifications);
 
 // ─── Analytics / Dashboard ────────────────────────────────

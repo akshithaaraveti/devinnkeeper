@@ -167,8 +167,23 @@ export async function deleteRoomNew(req, res) {
       return res.status(400).json({ error: `Cannot delete room #${roomId}: ${activeBookings.length} active reservation(s) exist. Please relocate or check out guests first.` });
     }
 
+    const room = await prisma.room.findUnique({ where: { id: roomId } });
+
     await prisma.room.delete({ where: { id: roomId } });
     res.json({ success: true });
+
+    try {
+      await createNotification({
+        type: NotificationType.ROOM_DELETED,
+        title: 'Room Deleted',
+        message: `Room ${room?.room_number || roomId} has been removed from inventory`,
+        priority: NotificationPriority.HIGH,
+        roomId,
+        metadata: { roomId, roomNumber: room?.room_number },
+      });
+    } catch (notifErr) {
+      console.error('[roomsController] ROOM_DELETED notification failed:', notifErr.message);
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -212,6 +227,7 @@ export async function markRoomClean(req, res) {
       where: { id: roomId },
       data: {
         status: 'CLEAN',
+        availability: true,
         last_updated: new Date(),
       },
     });
@@ -256,6 +272,7 @@ export async function markRoomDirty(req, res) {
       where: { id: roomId },
       data: {
         status: 'DIRTY',
+        availability: false,
         last_updated: new Date(),
       },
     });
@@ -299,6 +316,7 @@ export async function markRoomInspected(req, res) {
       where: { id: roomId },
       data: {
         status: 'CLEAN',
+        availability: true,
         last_updated: new Date(),
       },
     });
