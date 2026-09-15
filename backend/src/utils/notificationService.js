@@ -68,6 +68,18 @@ export const NotificationType = {
   USER_UPDATED:       'USER_UPDATED',
   USER_ROLE_CHANGED:  'USER_ROLE_CHANGED',
   USER_DEACTIVATED:   'USER_DEACTIVATED',
+
+  // Deletions / Removals
+  RESERVATION_DELETED:        'RESERVATION_DELETED',
+  VEHICLE_DELETED:            'VEHICLE_DELETED',
+  GUEST_DELETED:              'GUEST_DELETED',
+  ROOM_DELETED:               'ROOM_DELETED',
+  MAINTENANCE_DELETED:        'MAINTENANCE_DELETED',
+  HOUSEKEEPING_TASK_DELETED:  'HOUSEKEEPING_TASK_DELETED',
+  PAYMENT_DELETED:            'PAYMENT_DELETED',
+  EXPENSE_DELETED:            'EXPENSE_DELETED',
+  SHIFT_AUDIT_DELETED:        'SHIFT_AUDIT_DELETED',
+  CASH_LEDGER_DELETED:        'CASH_LEDGER_DELETED',
 };
 
 // ─── Priority Constants ────────────────────────────────────────────────────────
@@ -81,40 +93,50 @@ export const NotificationPriority = {
 // ─── Role-to-Notification Targeting Matrix ────────────────────────────────────
 // Default roles for each notification type (can be overridden on createNotification)
 const DEFAULT_TARGET_ROLES = {
-  NEW_RESERVATION:         ['admin', 'manager', 'receptionist'],
-  RESERVATION_UPDATED:     ['admin', 'manager', 'receptionist'],
-  RESERVATION_CANCELLED:   ['admin', 'manager', 'receptionist'],
-  NEW_ARRIVAL:             ['admin', 'manager', 'receptionist'],
-  GUEST_CHECKED_IN:        ['admin', 'manager', 'receptionist'],
-  GUEST_CHECKED_OUT:       ['admin', 'manager', 'receptionist', 'housekeeping'],
-  ROOM_STATUS_CHANGED:     ['admin', 'manager', 'receptionist', 'housekeeping'],
-  ROOM_DIRTY:              ['admin', 'manager', 'receptionist', 'housekeeping'],
-  ROOM_CLEAN:              ['admin', 'manager', 'receptionist', 'housekeeping'],
-  ROOM_READY:              ['admin', 'manager', 'receptionist'],
-  ROOM_OUT_OF_ORDER:       ['admin', 'manager', 'receptionist', 'maintenance'],
-  ROOM_OCCUPIED:           ['admin', 'manager', 'receptionist'],
-  ROOM_VACANT:             ['admin', 'manager', 'receptionist', 'housekeeping'],
-  HOUSEKEEPING_TASK_CREATED:   ['admin', 'manager', 'housekeeping'],
-  HOUSEKEEPING_TASK_ASSIGNED:  ['admin', 'manager', 'housekeeping'],
-  HOUSEKEEPING_TASK_UPDATED:   ['admin', 'manager', 'housekeeping'],
-  HOUSEKEEPING_TASK_COMPLETED: ['admin', 'manager', 'receptionist', 'housekeeping'],
-  ROOM_CLEANING_REQUIRED:      ['admin', 'manager', 'housekeeping'],
-  ROOM_CLEANING_COMPLETED:     ['admin', 'manager', 'receptionist', 'housekeeping'],
-  MAINTENANCE_CREATED:    ['admin', 'manager', 'receptionist', 'maintenance'],
-  MAINTENANCE_ASSIGNED:   ['admin', 'manager', 'maintenance'],
-  MAINTENANCE_UPDATED:    ['admin', 'manager', 'maintenance'],
-  MAINTENANCE_COMPLETED:  ['admin', 'manager', 'receptionist', 'maintenance'],
-  PAYMENT_RECEIVED:   ['admin', 'manager', 'receptionist'],
-  PAYMENT_PENDING:    ['admin', 'manager', 'receptionist'],
-  PAYMENT_FAILED:     ['admin', 'manager', 'receptionist'],
-  PAYMENT_REFUNDED:   ['admin', 'manager', 'receptionist'],
-  VEHICLE_ARRIVED:    ['admin', 'manager', 'receptionist'],
-  VEHICLE_DEPARTED:   ['admin', 'manager', 'receptionist'],
-  VEHICLE_REGISTERED: ['admin', 'manager', 'receptionist'],
-  VEHICLE_UPDATED:    ['admin', 'manager', 'receptionist'],
-  SHIFT_STARTED:  ['admin', 'manager'],
-  SHIFT_ENDED:    ['admin', 'manager'],
-  SHIFT_HANDOVER: ['admin', 'manager'],
+  NEW_RESERVATION:         ['admin', 'manager', 'receptionist', 'staff'],
+  RESERVATION_UPDATED:     ['admin', 'manager', 'receptionist', 'staff'],
+  RESERVATION_CANCELLED:   ['admin', 'manager', 'receptionist', 'staff'],
+  RESERVATION_DELETED:     ['admin', 'manager', 'receptionist', 'staff'],
+  NEW_ARRIVAL:             ['admin', 'manager', 'receptionist', 'staff'],
+  GUEST_CHECKED_IN:        ['admin', 'manager', 'receptionist', 'staff'],
+  GUEST_CHECKED_OUT:       ['admin', 'manager', 'receptionist', 'housekeeping', 'staff'],
+  GUEST_DELETED:           ['admin', 'manager', 'receptionist', 'staff'],
+  ROOM_STATUS_CHANGED:     ['admin', 'manager', 'receptionist', 'housekeeping', 'staff'],
+  ROOM_DIRTY:              ['admin', 'manager', 'receptionist', 'housekeeping', 'staff'],
+  ROOM_CLEAN:              ['admin', 'manager', 'receptionist', 'housekeeping', 'staff'],
+  ROOM_READY:              ['admin', 'manager', 'receptionist', 'staff'],
+  ROOM_OUT_OF_ORDER:       ['admin', 'manager', 'receptionist', 'maintenance', 'staff'],
+  ROOM_OCCUPIED:           ['admin', 'manager', 'receptionist', 'staff'],
+  ROOM_VACANT:             ['admin', 'manager', 'receptionist', 'housekeeping', 'staff'],
+  ROOM_DELETED:            ['admin', 'manager', 'receptionist', 'staff'],
+  HOUSEKEEPING_TASK_CREATED:   ['admin', 'manager', 'housekeeping', 'staff'],
+  HOUSEKEEPING_TASK_ASSIGNED:  ['admin', 'manager', 'housekeeping', 'staff'],
+  HOUSEKEEPING_TASK_UPDATED:   ['admin', 'manager', 'housekeeping', 'staff'],
+  HOUSEKEEPING_TASK_COMPLETED: ['admin', 'manager', 'receptionist', 'housekeeping', 'staff'],
+  HOUSEKEEPING_TASK_DELETED:   ['admin', 'manager', 'housekeeping', 'staff'],
+  ROOM_CLEANING_REQUIRED:      ['admin', 'manager', 'housekeeping', 'staff'],
+  ROOM_CLEANING_COMPLETED:     ['admin', 'manager', 'receptionist', 'housekeeping', 'staff'],
+  MAINTENANCE_CREATED:    ['admin', 'manager', 'receptionist', 'maintenance', 'staff'],
+  MAINTENANCE_ASSIGNED:   ['admin', 'manager', 'maintenance', 'staff'],
+  MAINTENANCE_UPDATED:    ['admin', 'manager', 'maintenance', 'staff'],
+  MAINTENANCE_COMPLETED:  ['admin', 'manager', 'receptionist', 'maintenance', 'staff'],
+  MAINTENANCE_DELETED:    ['admin', 'manager', 'receptionist', 'maintenance', 'staff'],
+  PAYMENT_RECEIVED:   ['admin', 'manager', 'receptionist', 'staff'],
+  PAYMENT_PENDING:    ['admin', 'manager', 'receptionist', 'staff'],
+  PAYMENT_FAILED:     ['admin', 'manager', 'receptionist', 'staff'],
+  PAYMENT_REFUNDED:   ['admin', 'manager', 'receptionist', 'staff'],
+  PAYMENT_DELETED:    ['admin', 'manager', 'receptionist', 'staff'],
+  VEHICLE_ARRIVED:    ['admin', 'manager', 'receptionist', 'staff'],
+  VEHICLE_DEPARTED:   ['admin', 'manager', 'receptionist', 'staff'],
+  VEHICLE_REGISTERED: ['admin', 'manager', 'receptionist', 'staff'],
+  VEHICLE_UPDATED:    ['admin', 'manager', 'receptionist', 'staff'],
+  VEHICLE_DELETED:    ['admin', 'manager', 'receptionist', 'staff'],
+  EXPENSE_DELETED:    ['admin', 'manager', 'staff'],
+  CASH_LEDGER_DELETED: ['admin', 'manager', 'staff'],
+  SHIFT_AUDIT_DELETED: ['admin', 'manager', 'staff'],
+  SHIFT_STARTED:  ['admin', 'manager', 'staff'],
+  SHIFT_ENDED:    ['admin', 'manager', 'staff'],
+  SHIFT_HANDOVER: ['admin', 'manager', 'staff'],
   USER_CREATED:       ['admin', 'manager'],
   USER_UPDATED:       ['admin', 'manager'],
   USER_ROLE_CHANGED:  ['admin', 'manager'],
@@ -157,7 +179,7 @@ export async function createNotification(data) {
     }
 
     // Determine target roles: use provided or fall back to defaults
-    const roles = targetRoles || DEFAULT_TARGET_ROLES[type] || ['admin', 'manager'];
+    const roles = targetRoles || DEFAULT_TARGET_ROLES[type] || ['admin', 'manager', 'staff'];
 
     const notification = await prisma.appNotification.create({
       data: {
@@ -175,18 +197,20 @@ export async function createNotification(data) {
       },
     });
 
-    // Emit via Socket.IO to all relevant role rooms
+    // Emit via Socket.IO to all relevant role rooms and connected clients
     const io = getSocketIo();
     if (io) {
       const payload = formatNotification(notification);
       // Emit to each role room
       for (const role of roles) {
-        io.to(`role:${role}`).emit('notification:new', payload);
+        io.to(`role:${String(role).toLowerCase()}`).emit('notification:new', payload);
       }
       // Emit to specific user if set
       if (recipientId) {
         io.to(`user:${recipientId}`).emit('notification:new', payload);
       }
+      // Broadcast to all connected clients
+      io.emit('notification:new', payload);
     }
 
     return notification;
@@ -222,6 +246,8 @@ export async function getNotificationsForUser(userId, role, options = {}) {
   });
 
   const userRole = (role || 'staff').toLowerCase();
+  const isAdminOrManager = userRole === 'admin' || userRole === 'manager';
+
   const filtered = allNotifications.filter(n => {
     // Parse target roles
     let roles = [];
@@ -230,7 +256,7 @@ export async function getNotificationsForUser(userId, role, options = {}) {
     } catch {
       roles = [];
     }
-    const roleMatch = roles.map(r => r.toLowerCase()).includes(userRole);
+    const roleMatch = isAdminOrManager || roles.includes('*') || roles.includes('all') || roles.map(r => String(r).toLowerCase()).includes(userRole);
     const recipientMatch = n.recipientId && n.recipientId === Number(userId);
     if (!roleMatch && !recipientMatch) return false;
     if (unreadOnly && n.readAt !== null) return false;
@@ -255,11 +281,12 @@ export async function getUnreadCount(userId, role) {
   });
 
   const userRole = (role || 'staff').toLowerCase();
+  const isAdminOrManager = userRole === 'admin' || userRole === 'manager';
   let count = 0;
   for (const n of allUnread) {
     let roles = [];
     try { roles = JSON.parse(n.targetRoles || '[]'); } catch { roles = []; }
-    const roleMatch = roles.map(r => r.toLowerCase()).includes(userRole);
+    const roleMatch = isAdminOrManager || roles.includes('*') || roles.includes('all') || roles.map(r => String(r).toLowerCase()).includes(userRole);
     const recipientMatch = n.recipientId && n.recipientId === Number(userId);
     if (roleMatch || recipientMatch) count++;
   }

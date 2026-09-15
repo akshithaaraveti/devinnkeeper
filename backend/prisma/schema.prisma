@@ -104,7 +104,7 @@ model PricingRule {
   percentage       Float
   priority         Int      @default(1)
   enabled          Boolean  @default(true)
-  scope            String? 
+  scope            String?
   created_at       DateTime @default(now())
 }
 
@@ -418,7 +418,7 @@ model AppNotification {
   metadata      String?
   readAt        DateTime?
   createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  updatedAt     DateTime  @default(now()) @updatedAt
 
   @@index([type])
   @@index([readAt])

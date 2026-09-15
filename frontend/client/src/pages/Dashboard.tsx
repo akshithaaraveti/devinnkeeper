@@ -76,23 +76,37 @@ export default function Dashboard() {
   const fetchAll = useCallback(async (isInitial = false) => {
     if (isInitial) setIsLoading(true);
     try {
-      const [roomsResp, reservationsResp, guestsResp, notificationsResp] = await Promise.all([
+      const [roomsResult, reservationsResult, guestsResult, notificationsResult] = await Promise.allSettled([
         apiClient.rooms.list({ limit: 250 }),
         apiClient.reservations.list(),
         apiClient.guests.list(),
         apiClient.notifications.list(),
       ]);
 
-      const roomsData = roomsResp?.data?.items ?? roomsResp?.data ?? [];
-      const reservationsData = reservationsResp?.data?.items ?? reservationsResp?.data ?? [];
-      const guestsData = guestsResp?.data?.items ?? guestsResp?.data ?? [];
-      const notificationsData = notificationsResp?.data?.items ?? notificationsResp?.data ?? [];
+      if (roomsResult.status === "fulfilled") {
+        const roomsResp = roomsResult.value;
+        const roomsData = roomsResp?.data?.items ?? roomsResp?.data ?? [];
+        setRooms(roomsData as any);
+      }
 
-      setRooms(roomsData as any);
-      setReservations(reservationsData as any);
-      setGuests(guestsData as any);
-      setNotifications(notificationsData as any);
-      setUnreadCount((notificationsData as any[]).filter((n: any) => !n.isRead).length || 0);
+      if (reservationsResult.status === "fulfilled") {
+        const reservationsResp = reservationsResult.value;
+        const reservationsData = reservationsResp?.data?.items ?? reservationsResp?.data ?? [];
+        setReservations(reservationsData as any);
+      }
+
+      if (guestsResult.status === "fulfilled") {
+        const guestsResp = guestsResult.value;
+        const guestsData = guestsResp?.data?.items ?? guestsResp?.data ?? [];
+        setGuests(guestsData as any);
+      }
+
+      if (notificationsResult.status === "fulfilled") {
+        const notificationsResp = notificationsResult.value;
+        const notificationsData = notificationsResp?.data?.items ?? notificationsResp?.data ?? [];
+        setNotifications(notificationsData as any);
+        setUnreadCount((notificationsData as any[]).filter((n: any) => !n.isRead && !n.readAt).length || 0);
+      }
     } catch (e) {
       console.warn("Failed to fetch dashboard data", e);
     } finally {
@@ -229,10 +243,10 @@ export default function Dashboard() {
             {/* Role Quick Action Shortcuts */}
             {currentRole === "receptionist" && (
               <>
-                <Button size="sm" onClick={() => setLocation("/checkin")} className="rounded-xl font-bold text-xs bg-[#8B6748] hover:bg-[#725137] text-white gap-1.5 cursor-pointer">
+                <Button size="sm" onClick={() => setLocation("/checkin")} className="rounded-xl font-bold text-xs gap-1.5 cursor-pointer">
                   <ShieldCheck className="h-3.5 w-3.5" /> Check-In Guest
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => setLocation("/reservations")} className="rounded-xl font-bold text-xs gap-1.5 cursor-pointer border-[#8B6748] text-[#8B6748] hover:bg-[#F3EDE4]">
+                <Button size="sm" variant="outline" onClick={() => setLocation("/reservations")} className="rounded-xl font-bold text-xs gap-1.5 cursor-pointer">
                   <Calendar className="h-3.5 w-3.5" /> Bookings
                 </Button>
               </>
@@ -240,7 +254,7 @@ export default function Dashboard() {
 
             {currentRole === "manager" && (
               <>
-                <Button size="sm" onClick={() => setLocation("/housekeeping")} className="rounded-xl font-bold text-xs bg-primary text-primary-foreground gap-1.5 cursor-pointer">
+                <Button size="sm" onClick={() => setLocation("/housekeeping")} className="rounded-xl font-bold text-xs gap-1.5 cursor-pointer">
                   <Sparkles className="h-3.5 w-3.5" /> Housekeeping Tasks
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => setLocation("/shift-audits")} className="rounded-xl font-bold text-xs gap-1.5 cursor-pointer">
@@ -251,7 +265,7 @@ export default function Dashboard() {
 
             {currentRole === "admin" && (
               <>
-                <Button size="sm" onClick={() => setLocation("/reservations")} className="rounded-xl font-bold text-xs bg-primary text-primary-foreground gap-1.5 cursor-pointer">
+                <Button size="sm" onClick={() => setLocation("/reservations")} className="rounded-xl font-bold text-xs gap-1.5 cursor-pointer">
                   <Calendar className="h-3.5 w-3.5" /> All Reservations
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => setLocation("/shift-audits")} className="rounded-xl font-bold text-xs gap-1.5 cursor-pointer">

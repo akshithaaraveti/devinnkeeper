@@ -444,6 +444,7 @@
     "completeRepair": "मरम्मत पूरी करें",
     "resume": "फिर से शुरू करें",
     "pause": "रोकें",
+    "resolve": "समस्या हल करें",
     "showingTickets": "{{total}} रखरखाव टिकटों में से {{start}} - {{end}} दिखाए जा रहे हैं",
     "newTicket": "रखरखाव समस्या की रिपोर्ट करें",
     "roomLocation": "कमरे का स्थान",

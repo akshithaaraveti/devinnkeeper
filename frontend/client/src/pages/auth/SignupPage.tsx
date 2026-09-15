@@ -277,7 +277,7 @@ export default function SignupPage() {
 
           <div className="rounded-[24px] border border-[#E8DED2] bg-[#FAF7F2]/95 p-6 shadow-inner shadow-[#B89572]/20 sm:p-8">
             <div className="mb-6 text-center lg:text-left">
-              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600/10 text-blue-600 lg:mx-0">
+              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary lg:mx-0">
                 <UserRound className="h-6 w-6" />
               </div>
               <h2 className="font-serif text-3xl font-bold text-[#3F352D]">Join Motel Innkeeper</h2>

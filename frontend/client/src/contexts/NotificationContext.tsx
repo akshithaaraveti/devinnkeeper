@@ -57,71 +57,17 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     try {
       const res = await apiClient.notifications.list({ page, limit });
       const items = res.data?.items || res.data?.notifications || (Array.isArray(res.data) ? res.data : []);
-      if (items.length > 0) {
-        setNotifications(items);
-      } else {
-        // Fallback default notifications if none on server yet
-        const defaultNotifs: AppNotification[] = [
-          {
-            id: 101,
-            type: 'system',
-            title: 'Check-In Verification System Ready',
-            message: 'All digital room key authentication services are operational.',
-            priority: 'NORMAL',
-            isRead: false,
-            createdAt: new Date().toISOString(),
-          },
-          {
-            id: 102,
-            type: 'reservation',
-            title: 'Guest Check-In Activity Logged',
-            message: 'Reservation #0001 (Swathi Guest) successfully checked into Room #5.',
-            priority: 'NORMAL',
-            isRead: false,
-            createdAt: new Date(Date.now() - 3600000).toISOString(),
-          },
-          {
-            id: 103,
-            type: 'maintenance',
-            title: 'Smart Lock Network Status',
-            message: 'All 15 room lock gateways connected via Bluetooth LE & AES-256.',
-            priority: 'NORMAL',
-            isRead: true,
-            createdAt: new Date(Date.now() - 7200000).toISOString(),
-          },
-        ];
-        setNotifications(defaultNotifs);
-        setUnreadCount(defaultNotifs.filter(n => !n.isRead).length);
+      setNotifications(items);
+      const unread = items.filter((n: AppNotification) => !n.isRead && !n.readAt).length;
+      if (unreadCount === 0 && unread > 0) {
+        setUnreadCount(unread);
       }
     } catch (e) {
       console.error('Failed to fetch notifications:', e);
-      // Fallback default notifications on network error
-      const defaultNotifs: AppNotification[] = [
-        {
-          id: 101,
-          type: 'system',
-          title: 'Check-In Verification System Ready',
-          message: 'All digital room key authentication services are operational.',
-          priority: 'NORMAL',
-          isRead: false,
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: 102,
-          type: 'reservation',
-          title: 'Guest Check-In Activity Logged',
-          message: 'Reservation #0001 (Swathi Guest) successfully checked into Room #5.',
-          priority: 'NORMAL',
-          isRead: false,
-          createdAt: new Date(Date.now() - 3600000).toISOString(),
-        },
-      ];
-      setNotifications(defaultNotifs);
-      setUnreadCount(defaultNotifs.filter(n => !n.isRead).length);
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, unreadCount]);
 
   const playNotificationSound = () => {
     try {
@@ -151,7 +97,10 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       toast.info(notif.title, { description: notif.message, duration: 4000 });
     }
 
-    setNotifications(prev => [notif, ...prev]);
+    setNotifications(prev => {
+      if (prev.some(n => n.id === notif.id)) return prev;
+      return [notif, ...prev];
+    });
     setUnreadCount(prev => prev + 1);
   }, []);
 
@@ -165,6 +114,12 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
     fetchUnreadCount();
     fetchNotifications();
+
+    // 10-second heartbeat to guarantee synchronized notification state
+    const interval = setInterval(() => {
+      fetchUnreadCount();
+      fetchNotifications();
+    }, 10000);
 
     const token = localStorage.getItem('innkeeper_token') || sessionStorage.getItem('innkeeper_session_token');
     const wsUrl = window.location.origin;
@@ -188,7 +143,13 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       handleNewNotification(data);
     });
 
+    socket.on('approval:update', () => {
+      fetchNotifications();
+      fetchUnreadCount();
+    });
+
     return () => {
+      clearInterval(interval);
       socket.disconnect();
     };
   }, [user, fetchUnreadCount, fetchNotifications, handleNewNotification]);

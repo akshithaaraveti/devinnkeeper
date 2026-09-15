@@ -235,7 +235,7 @@ export default function HousekeepingPage() {
   return (
     <div className="space-y-6">
       {/* Top Hero Banner with Housekeeping Image */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-6 sm:p-7 shadow-xl border border-white/10">
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#2A1D15] via-[#3D2B1E] to-[#543A29] text-white p-6 sm:p-7 shadow-xl border border-[#8B6748]/30">
         {/* Background Decorative Housekeeping Photo */}
         <div className="absolute right-0 top-0 bottom-0 w-full sm:w-1/2 lg:w-2/5 overflow-hidden opacity-25 sm:opacity-35 pointer-events-none">
           <img
@@ -243,7 +243,7 @@ export default function HousekeepingPage() {
             alt="Housekeeping Staff"
             className="w-full h-full object-cover object-center mix-blend-luminosity"
           />
-          <div className="absolute inset-0 bg-gradient-to-r from-blue-950 via-blue-950/70 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#2A1D15] via-[#2A1D15]/70 to-transparent" />
         </div>
 
         <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5">
@@ -254,14 +254,14 @@ export default function HousekeepingPage() {
                 alt="Housekeeping Team"
                 className="h-full w-full object-cover"
               />
-              <div className="absolute bottom-1 right-1 h-3.5 w-3.5 rounded-full bg-emerald-400 ring-2 ring-blue-950" title="Active on duty" />
+              <div className="absolute bottom-1 right-1 h-3.5 w-3.5 rounded-full bg-emerald-400 ring-2 ring-[#2A1D15]" title="Active on duty" />
             </div>
             <div>
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/15 text-blue-100 text-[11px] font-bold mb-1.5 border border-white/20">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/15 text-[#EFE7DE] text-[11px] font-bold mb-1.5 border border-white/20">
                 <Sparkles className="h-3 w-3 text-amber-300" /> Cleanliness & Turnaround Operations
               </div>
               <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">{t("housekeeping.title")}</h1>
-              <p className="text-xs sm:text-sm text-blue-200 mt-1 max-w-lg">{t("housekeeping.subtitle")}</p>
+              <p className="text-xs sm:text-sm text-[#E2D4C3] mt-1 max-w-lg">{t("housekeeping.subtitle")}</p>
             </div>
           </div>
 
@@ -269,7 +269,7 @@ export default function HousekeepingPage() {
             <Button
               size="sm"
               onClick={() => { form.reset(); setDialogOpen(true); }}
-              className="bg-white hover:bg-sky-50 text-blue-950 gap-2 rounded-xl font-bold shadow-md cursor-pointer px-4 py-2.5 text-sm"
+              className="bg-[#8B6748] hover:bg-[#745539] text-white gap-2 rounded-xl font-bold shadow-md cursor-pointer px-4 py-2.5 text-sm border border-white/20"
             >
               <Plus className="h-4 w-4" /> {t("common.create")}
             </Button>
@@ -474,7 +474,7 @@ export default function HousekeepingPage() {
                           {status === "pending" && (
                             <Button
                               onClick={() => updateM.mutate({ id: task.id, data: { status: "in-progress", cleaningStartedAt: new Date().toISOString() } })}
-                              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md py-2.5 cursor-pointer"
+                              className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl shadow-md shadow-primary/20 py-2.5 cursor-pointer"
                             >
                               ▶ {t("housekeeping.startCleaning")}
                             </Button>
@@ -488,7 +488,7 @@ export default function HousekeepingPage() {
                                   updateRoomM.mutate({ roomId: Number(task.roomId), status: "vacant" });
                                 }
                               }}
-                              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md py-2.5 cursor-pointer"
+                              className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl shadow-md shadow-primary/20 py-2.5 cursor-pointer"
                             >
                               ✓ {t("housekeeping.markCleanVacant")}
                             </Button>
@@ -499,7 +499,7 @@ export default function HousekeepingPage() {
                                 fireConfettiBlast();
                                 updateM.mutate({ id: task.id, data: { status: "inspected" } });
                               }}
-                              className="flex-1 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl shadow-md py-2.5 cursor-pointer"
+                              className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl shadow-md shadow-primary/20 py-2.5 cursor-pointer"
                             >
                               🛡 {t("housekeeping.approveInspection")}
                             </Button>
@@ -507,7 +507,7 @@ export default function HousekeepingPage() {
                           {status === "inspected" && (
                             <Button
                               onClick={() => updateM.mutate({ id: task.id, data: { status: "pending" } })}
-                              className="flex-1 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl shadow-md py-2.5 cursor-pointer"
+                              className="flex-1 bg-[#8B6748]/80 hover:bg-[#8B6748] text-white font-bold rounded-xl shadow-md shadow-primary/20 py-2.5 cursor-pointer"
                             >
                               ↻ {t("housekeeping.markDirty")}
                             </Button>
@@ -766,10 +766,10 @@ export default function HousekeepingPage() {
                 <FormControl><Input placeholder={t("housekeeping.placeholderNotes")} {...form.register("notes")} /></FormControl>
               </FormItem>
               <div className="flex gap-3 justify-end pt-4">
-                <Button type="button" variant="outline" className="h-11 rounded-2xl border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium px-6" onClick={() => setDialogOpen(false)}>
+                <Button type="button" variant="outline" className="h-11 rounded-2xl border-border bg-card hover:bg-accent text-foreground font-medium px-6" onClick={() => setDialogOpen(false)}>
                   {t("common.cancel")}
                 </Button>
-                <Button type="submit" className="h-11 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6" disabled={createM.isPending}>
+                <Button type="submit" className="h-11 rounded-2xl bg-primary hover:bg-primary/90 text-primary-foreground font-semibold px-6 shadow-md shadow-primary/20" disabled={createM.isPending}>
                   {createM.isPending ? t("common.submitting") : t("housekeeping.saveTask")}
                 </Button>
               </div>

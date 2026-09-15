@@ -16,7 +16,48 @@ import confetti from "canvas-confetti";
 import { DataTablePagination } from "@/components/ui/DataTablePagination";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-function LiveStopwatch({ startTime, isPaused, accumulatedSeconds = 0 }: { startTime?: string | number; isPaused?: boolean; accumulatedSeconds?: number }) {
+const TIMER_STORAGE_KEY_PREFIX = "innkeeper_maint_timer_";
+
+interface StoredTimerData {
+  status?: string;
+  repairStartedAt?: string | null;
+  accumulatedSeconds?: number;
+  updatedAt?: number;
+}
+
+function getTimerCache(ticketId: string | number): StoredTimerData | null {
+  try {
+    const raw = localStorage.getItem(`${TIMER_STORAGE_KEY_PREFIX}${ticketId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function setTimerCache(ticketId: string | number, data: StoredTimerData) {
+  try {
+    localStorage.setItem(
+      `${TIMER_STORAGE_KEY_PREFIX}${ticketId}`,
+      JSON.stringify({ ...data, updatedAt: Date.now() })
+    );
+  } catch {}
+}
+
+function removeTimerCache(ticketId: string | number) {
+  try {
+    localStorage.removeItem(`${TIMER_STORAGE_KEY_PREFIX}${ticketId}`);
+  } catch {}
+}
+
+function LiveStopwatch({
+  startTime,
+  isPaused,
+  accumulatedSeconds = 0,
+}: {
+  startTime?: string | number | null;
+  isPaused?: boolean;
+  accumulatedSeconds?: number;
+}) {
   const [seconds, setSeconds] = useState(accumulatedSeconds);
 
   useEffect(() => {
@@ -25,20 +66,27 @@ function LiveStopwatch({ startTime, isPaused, accumulatedSeconds = 0 }: { startT
       return;
     }
 
-    const startMs = startTime ? new Date(startTime).getTime() : Date.now();
+    const parsedStart = startTime ? new Date(startTime).getTime() : NaN;
+    const startMs = !isNaN(parsedStart) ? parsedStart : Date.now();
+
     const updateTimer = () => {
       const elapsed = Math.max(0, Math.floor((Date.now() - startMs) / 1000)) + accumulatedSeconds;
       setSeconds(elapsed);
     };
+
     updateTimer();
     const interval = setInterval(updateTimer, 1000);
     return () => clearInterval(interval);
   }, [startTime, isPaused, accumulatedSeconds]);
 
-  const mins = String(Math.floor(seconds / 60)).padStart(2, "0");
-  const secs = String(seconds % 60).padStart(2, "0");
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  const formatted = hrs > 0
+    ? `${String(hrs).padStart(2, "0")}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
+    : `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 
-  return <span className="font-mono text-sm font-bold text-amber-900 dark:text-amber-300">{mins}:{secs}</span>;
+  return <span className="font-mono text-sm font-bold text-amber-900 dark:text-amber-300">{formatted}</span>;
 }
 
 function fireConfettiBlast() {
@@ -115,7 +163,27 @@ export default function MaintenancePage() {
 
       // Maintenance tickets are the source of truth (works for both room-specific
       // and general/property tickets); resolved ones drop off the active view.
-      const activeMaintList: any[] = list.filter((m: any) => m.status !== "resolved");
+      const activeMaintList: any[] = list
+        .filter((m: any) => m.status !== "resolved")
+        .map((m: any) => {
+          const cached = getTimerCache(m.id);
+          if (cached) {
+            return {
+              ...m,
+              status: cached.status || m.status,
+              repairStartedAt: cached.repairStartedAt !== undefined ? cached.repairStartedAt : m.repairStartedAt,
+              accumulatedSeconds: cached.accumulatedSeconds !== undefined ? cached.accumulatedSeconds : (m.accumulatedSeconds || 0),
+            };
+          }
+          if (m.status === "in-progress" || m.status === "paused") {
+            setTimerCache(m.id, {
+              status: m.status,
+              repairStartedAt: m.repairStartedAt || null,
+              accumulatedSeconds: m.accumulatedSeconds || 0,
+            });
+          }
+          return m;
+        });
 
       // Also surface any room flagged 'maintenance' that has no matching ticket yet
       // (e.g. status changed outside this form) so the room isn't silently orphaned.
@@ -144,7 +212,11 @@ export default function MaintenancePage() {
       let filtered = activeMaintList;
 
       if (filterPriority !== "all") filtered = filtered.filter((r: any) => r.priority === filterPriority);
-      if (filterStatus !== "all") filtered = filtered.filter((r: any) => r.status === filterStatus);
+      if (filterStatus === "in-progress") {
+        filtered = filtered.filter((r: any) => r.status === "in-progress" || r.status === "paused");
+      } else if (filterStatus !== "all") {
+        filtered = filtered.filter((r: any) => r.status === filterStatus);
+      }
       return filtered;
     },
   });
@@ -231,7 +303,7 @@ export default function MaintenancePage() {
             </SelectContent>
           </Select>
 
-          <Button onClick={() => { form.reset(); setDialogOpen(true); }} className="w-full sm:w-auto gap-2 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl shadow-md cursor-pointer">
+          <Button onClick={() => { form.reset(); setDialogOpen(true); }} className="w-full sm:w-auto gap-2 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl shadow-md shadow-primary/20 cursor-pointer">
             <Plus className="h-4 w-4" /> {t("maintenance.newTicket")}
           </Button>
         </div>
@@ -297,7 +369,7 @@ export default function MaintenancePage() {
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="text-xs font-mono font-bold text-pink-600 bg-pink-500/10 px-2 py-0.5 rounded border border-pink-500/20">
-                              TKT-2026-00{ticket.id}
+                              {String(ticket.id).startsWith("maint-") ? `TKT-RM-${String(ticket.id).replace("maint-", "")}` : `TKT-2026-00${ticket.id}`}
                             </span>
                             <span className="text-xs text-muted-foreground font-semibold">{t("roomDrawer.roomNumber", { number: roomLabel })}</span>
                           </div>
@@ -345,29 +417,45 @@ export default function MaintenancePage() {
                         {ticket.status === "open" && (
                           <Button
                             onClick={() => {
+                              const newStart = new Date().toISOString();
                               if (typeof ticket.id === "string" && ticket.id.startsWith("maint-")) {
                                 const numericRoomId = Number(ticket.id.replace("maint-", ""));
                                 apiClient.maintenance.create({
                                   roomId: numericRoomId,
                                   issue: ticket.issue,
-                                  priority: "high",
+                                  priority: ticket.priority || "high",
                                   status: "in-progress",
-                                  repairStartedAt: new Date().toISOString(),
-                                }).then(() => {
+                                  repairStartedAt: newStart,
+                                  accumulatedSeconds: 0,
+                                }).then((res: any) => {
+                                  const createdId = res?.data?.id;
+                                  if (createdId) {
+                                    setTimerCache(createdId, {
+                                      status: "in-progress",
+                                      repairStartedAt: newStart,
+                                      accumulatedSeconds: 0,
+                                    });
+                                  }
                                   qc.invalidateQueries({ queryKey: ["maintenance"] });
                                   toast.success(t("maintenance.toastRepairStarted"));
                                 });
                               } else {
+                                setTimerCache(ticket.id, {
+                                  status: "in-progress",
+                                  repairStartedAt: newStart,
+                                  accumulatedSeconds: 0,
+                                });
                                 updateM.mutate({
                                   id: ticket.id,
                                   data: {
                                     status: "in-progress",
-                                    repairStartedAt: new Date().toISOString(),
+                                    repairStartedAt: newStart,
+                                    accumulatedSeconds: 0,
                                   },
                                 });
                               }
                             }}
-                            className="flex-1 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl shadow-md py-2.5 cursor-pointer"
+                            className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl shadow-md shadow-primary/20 py-2.5 cursor-pointer"
                           >
                             ▶ {t("maintenance.startRepair")}
                           </Button>
@@ -376,23 +464,37 @@ export default function MaintenancePage() {
                           <>
                             <Button
                               onClick={() => {
+                                const cached = getTimerCache(ticket.id);
+                                const startIso = ticket.repairStartedAt || cached?.repairStartedAt;
                                 const now = Date.now();
-                                const start = ticket.repairStartedAt ? new Date(ticket.repairStartedAt).getTime() : now;
-                                const elapsed = Math.max(0, Math.floor((now - start) / 1000));
+                                const parsedStart = startIso ? new Date(startIso).getTime() : now;
+                                const startMs = !isNaN(parsedStart) ? parsedStart : now;
+                                const elapsed = Math.max(0, Math.floor((now - startMs) / 1000));
+                                const baseAccumulated = Number(ticket.accumulatedSeconds ?? cached?.accumulatedSeconds ?? 0);
+                                const totalAccumulated = baseAccumulated + elapsed;
+
+                                setTimerCache(ticket.id, {
+                                  status: "paused",
+                                  repairStartedAt: null,
+                                  accumulatedSeconds: totalAccumulated,
+                                });
+
                                 updateM.mutate({
                                   id: ticket.id,
                                   data: {
                                     status: "paused",
-                                    accumulatedSeconds: (ticket.accumulatedSeconds || 0) + elapsed,
+                                    repairStartedAt: null,
+                                    accumulatedSeconds: totalAccumulated,
                                   },
                                 });
                               }}
-                              className="flex-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow-md py-2.5 cursor-pointer"
+                              className="flex-1 bg-[#A26D3F] hover:bg-[#8F5F36] text-white font-bold rounded-xl shadow-md py-2.5 cursor-pointer"
                             >
                               ⏸ {t("maintenance.pause")}
                             </Button>
                             <Button
                               onClick={() => {
+                                removeTimerCache(ticket.id);
                                 fireConfettiBlast();
                                 updateM.mutate({ id: ticket.id, data: { status: "resolved" } });
                                 if (ticket.roomId) {
@@ -403,9 +505,9 @@ export default function MaintenancePage() {
                                   });
                                 }
                               }}
-                              className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md py-2.5 cursor-pointer"
+                              className="flex-1 bg-[#6B4E36] hover:bg-[#583F2B] text-white font-bold rounded-xl shadow-md shadow-primary/20 py-2.5 cursor-pointer"
                             >
-                              ✓ {t("maintenance.resolve")}
+                              ✓ {t("maintenance.resolve", "Resolve Issue")}
                             </Button>
                           </>
                         )}
@@ -413,20 +515,32 @@ export default function MaintenancePage() {
                           <>
                             <Button
                               onClick={() => {
+                                const cached = getTimerCache(ticket.id);
+                                const baseAccumulated = Number(ticket.accumulatedSeconds ?? cached?.accumulatedSeconds ?? 0);
+                                const newStart = new Date().toISOString();
+
+                                setTimerCache(ticket.id, {
+                                  status: "in-progress",
+                                  repairStartedAt: newStart,
+                                  accumulatedSeconds: baseAccumulated,
+                                });
+
                                 updateM.mutate({
                                   id: ticket.id,
                                   data: {
                                     status: "in-progress",
-                                    repairStartedAt: new Date().toISOString(),
+                                    repairStartedAt: newStart,
+                                    accumulatedSeconds: baseAccumulated,
                                   },
                                 });
                               }}
-                              className="flex-1 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl shadow-md py-2.5 cursor-pointer"
+                              className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl shadow-md shadow-primary/20 py-2.5 cursor-pointer"
                             >
                               ▶ {t("maintenance.resume")}
                             </Button>
                             <Button
                               onClick={() => {
+                                removeTimerCache(ticket.id);
                                 fireConfettiBlast();
                                 updateM.mutate({ id: ticket.id, data: { status: "resolved" } });
                                 if (ticket.roomId) {
@@ -437,9 +551,9 @@ export default function MaintenancePage() {
                                   });
                                 }
                               }}
-                              className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md py-2.5 cursor-pointer"
+                              className="flex-1 bg-[#6B4E36] hover:bg-[#583F2B] text-white font-bold rounded-xl shadow-md shadow-primary/20 py-2.5 cursor-pointer"
                             >
-                              ✓ {t("maintenance.resolve")}
+                              ✓ {t("maintenance.resolve", "Resolve Issue")}
                             </Button>
                           </>
                         )}
@@ -661,10 +775,10 @@ export default function MaintenancePage() {
                 <FormControl><Input placeholder={t("maintenance.placeholderNotes")} {...form.register("notes")} /></FormControl>
               </FormItem>
               <div className="flex gap-3 justify-end pt-4">
-                <Button type="button" variant="outline" className="h-11 rounded-2xl border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium px-6 shadow-2xs" onClick={() => setDialogOpen(false)}>
+                <Button type="button" variant="outline" className="h-11 rounded-2xl border-border bg-card hover:bg-accent text-foreground font-medium px-6 shadow-2xs" onClick={() => setDialogOpen(false)}>
                   {t("common.cancel")}
                 </Button>
-                <Button type="submit" className="h-11 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 shadow-md shadow-blue-500/20" disabled={createM.isPending}>
+                <Button type="submit" className="h-11 rounded-2xl bg-primary hover:bg-primary/90 text-primary-foreground font-semibold px-6 shadow-md shadow-primary/20" disabled={createM.isPending}>
                   {createM.isPending ? t("common.submitting") : t("maintenance.reportIssue")}
                 </Button>
               </div>

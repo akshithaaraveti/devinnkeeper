@@ -58,19 +58,33 @@ export default function GuestsPage() {
 
   const createM = useMutation({
     mutationFn: (d: any) => apiClient.guests.create(d),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["guests"] }); toast.success("Guest profile created"); setDialogOpen(false); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["guests"] });
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+      toast.success("Guest profile created");
+      setDialogOpen(false);
+    },
     onError: (e: any) => toast.error(e?.response?.data?.error || "Failed to create guest"),
   });
 
   const updateM = useMutation({
     mutationFn: ({ id, data }: any) => apiClient.guests.update(id, data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["guests"] }); toast.success("Guest profile updated"); setDialogOpen(false); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["guests"] });
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+      toast.success("Guest profile updated");
+      setDialogOpen(false);
+    },
     onError: (e: any) => toast.error(e?.response?.data?.error || "Failed to update guest"),
   });
 
   const deleteM = useMutation({
     mutationFn: (id: string) => apiClient.guests.remove(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["guests"] }); toast.success("Guest deleted"); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["guests"] });
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+      toast.success("Guest deleted");
+    },
     onError: () => toast.error("Failed to delete guest"),
   });
 
@@ -249,10 +263,10 @@ export default function GuestsPage() {
                 <FormControl><Input placeholder="e.g. High floor, non-smoking..." {...form.register("specialRequests")} /></FormControl>
               </FormItem>
               <div className="flex gap-3 justify-end pt-4">
-                <Button type="button" variant="outline" className="h-11 rounded-2xl border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium px-6 shadow-2xs" onClick={() => setDialogOpen(false)}>
+                <Button type="button" variant="outline" className="h-11 rounded-2xl font-medium px-6 shadow-2xs" onClick={() => setDialogOpen(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" className="h-11 rounded-2xl bg-[#8B6748] hover:bg-[#7A5A3C] text-white font-semibold px-6 shadow-md shadow-[#8B6748]/20" disabled={createM.isPending || updateM.isPending}>
+                <Button type="submit" className="h-11 rounded-2xl font-semibold px-6 shadow-md shadow-primary/20" disabled={createM.isPending || updateM.isPending}>
                   {createM.isPending || updateM.isPending ? "Saving..." : "Save Guest"}
                 </Button>
               </div>

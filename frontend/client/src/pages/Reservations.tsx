@@ -161,7 +161,11 @@ export default function ReservationsPage() {
 
   const deleteM = useMutation({
     mutationFn: (id: string) => apiClient.reservations.remove(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["reservations"] }); toast.success("Reservation deleted"); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["reservations"] });
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+      toast.success("Reservation deleted");
+    },
     onError: () => toast.error("Failed to delete reservation"),
   });
 
@@ -706,10 +710,10 @@ className="h-10 min-w-0 flex-1 border-0 rounded-l-none pl-3 shadow-none focus-vi
               </div>
 
               <div className="flex flex-col-reverse sm:flex-row gap-2.5 sm:gap-3 justify-end pt-4">
-                <Button type="button" variant="outline" className="h-11 rounded-2xl border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium px-6 shadow-2xs w-full sm:w-auto cursor-pointer" onClick={() => setDialogOpen(false)}>
+                <Button type="button" variant="outline" className="h-11 rounded-2xl font-medium px-6 shadow-2xs w-full sm:w-auto cursor-pointer" onClick={() => setDialogOpen(false)}>
                   {t("common.cancel")}
                 </Button>
-                <Button type="submit" className="h-11 rounded-2xl bg-[#8B6748] hover:bg-[#6B563E] text-white font-semibold px-6 shadow-md shadow-[#8B6748]/20 w-full sm:w-auto cursor-pointer" disabled={createM.isPending || updateM.isPending}>
+                <Button type="submit" className="h-11 rounded-2xl font-semibold px-6 shadow-md shadow-primary/20 w-full sm:w-auto cursor-pointer" disabled={createM.isPending || updateM.isPending}>
                   {createM.isPending || updateM.isPending ? t("common.saving") : t("reservations.saveReservationButton")}
                 </Button>
               </div>

@@ -143,7 +143,7 @@ export default function MetricsDashboard({ rooms, reservations, role = "admin" }
           value: `${metrics.occupancyRate}%`,
           detail: `${metrics.occupiedRooms} of ${metrics.totalRooms} rooms occupied`,
           icon: Bed,
-          accent: "from-sky-500/15 to-blue-500/5",
+          accent: "from-sky-500/15 to--500/5",
           tint: "text-sky-600",
           progress: metrics.occupancyRate,
         },
@@ -161,7 +161,7 @@ export default function MetricsDashboard({ rooms, reservations, role = "admin" }
           value: `${metrics.todayArrivalsCount}`,
           detail: "Expected guest check-ins today",
           icon: DoorOpen,
-          accent: "from-blue-500/15 to-indigo-500/5",
+          accent: "from--500/15 to-indigo-500/5",
           tint: "text-blue-600",
           progress: Math.min(metrics.todayArrivalsCount * 10, 100),
         },
@@ -304,15 +304,14 @@ export default function MetricsDashboard({ rooms, reservations, role = "admin" }
                     initial={{ width: 0 }}
                     animate={{ width: `${metric.progress}%` }}
                     transition={{ duration: 0.7, delay: index * 0.05, ease: [0.23, 1, 0.32, 1] }}
-                    className={`h-full rounded-full bg-gradient-to-r ${
-                      metric.accent.includes("sky") || metric.accent.includes("blue")
-                        ? "from-sky-500 to-blue-600"
-                        : metric.accent.includes("emerald") || metric.accent.includes("teal")
+                    className={`h-full rounded-full bg-gradient-to-r ${metric.accent.includes("sky") || metric.accent.includes("blue")
+                      ? "from-sky-500 to-blue-600"
+                      : metric.accent.includes("emerald") || metric.accent.includes("teal")
                         ? "from-emerald-500 to-teal-600"
                         : metric.accent.includes("violet")
-                        ? "from-violet-500 to-fuchsia-600"
-                        : "from-amber-500 to-orange-600"
-                    }`}
+                          ? "from-violet-500 to-fuchsia-600"
+                          : "from-amber-500 to-orange-600"
+                      }`}
                   />
                 </div>
                 <p className="mt-2 text-xs text-muted-foreground">{metric.detail}</p>
@@ -378,9 +377,8 @@ export default function MetricsDashboard({ rooms, reservations, role = "admin" }
                 <CardTitle className="text-sm font-semibold text-foreground">{t("dashboard.adrPerformance", "ADR Performance")}</CardTitle>
                 {adrTrend !== null && (
                   <div
-                    className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                      adrTrend >= 0 ? "bg-emerald-500/10 text-emerald-600" : "bg-red-500/10 text-red-600"
-                    }`}
+                    className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${adrTrend >= 0 ? "bg-emerald-500/10 text-emerald-600" : "bg-red-500/10 text-red-600"
+                      }`}
                   >
                     <ArrowUpRight className={`h-3.5 w-3.5 ${adrTrend < 0 ? "rotate-180" : ""}`} />
                     {adrTrend >= 0 ? "Up" : "Down"} {Math.abs(adrTrend)}%
