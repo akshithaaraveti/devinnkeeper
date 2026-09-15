@@ -418,10 +418,19 @@ export async function processManualCheckInPayment(req, res) {
 
 async function issueDigitalKey(reservation) {
   if (reservation.digitalKeyStatus === 'ACTIVE' && reservation.digitalKey && reservation.digitalPin && reservation.lockId) {
+    const storedKeyPayload = JSON.parse(reservation.digitalKey);
     return {
       digitalPin: reservation.digitalPin,
       lockId: reservation.lockId,
-      keyPayload: JSON.parse(reservation.digitalKey),
+      keyPayload: storedKeyPayload,
+      qrPayload: {
+        type: 'innkeeper-digital-access',
+        reservationId: reservation.id,
+        lockId: reservation.lockId,
+        digitalPin: reservation.digitalPin,
+        validFrom: storedKeyPayload.validFrom,
+        validUntil: storedKeyPayload.validUntil,
+      },
     };
   }
 
@@ -432,7 +441,19 @@ async function issueDigitalKey(reservation) {
   const validUntil = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
   const keyPayload = lockService.generateDigitalKeyPayload(String(reservation.id), lockId, validFrom, validUntil);
 
-  return { digitalPin, lockId, keyPayload };
+  return {
+    digitalPin,
+    lockId,
+    keyPayload,
+    qrPayload: {
+      type: 'innkeeper-digital-access',
+      reservationId: reservation.id,
+      lockId,
+      digitalPin,
+      validFrom,
+      validUntil,
+    },
+  };
 }
 
 // Complete Guest Check-In Endpoint. This is the only endpoint that changes a reservation to checked_in.
@@ -535,7 +556,9 @@ export async function completeGuestCheckIn(req, res) {
     res.json({
       success: true,
       message: `Check-in completed for ${gName}! Status set to Checked-In.`,
-      ...key,
+      digitalPin: key.digitalPin,
+      lockId: key.lockId,
+      qrPayload: key.qrPayload,
       reservation: updated
     });
   } catch (err) {

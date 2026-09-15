@@ -21,6 +21,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import QRCode from "qrcode";
 import { api } from "@/lib/api";
 import { useTheme } from "@/contexts/ThemeContext";
 
@@ -173,13 +174,41 @@ export default function CheckInVerification() {
   const [verificationResult, setVerificationResult] = useState<any>(null);
 
   // Lock Key & Door Simulation
-  const [generatingKey, setGeneratingKey] = useState<boolean>(false);
   const [keyDetails, setKeyDetails] = useState<any>(null);
+  const [qrCodeUrl, setQrCodeUrl] = useState<string>("");
+  const [downloadingDetails, setDownloadingDetails] = useState<boolean>(false);
   const [doorStatus, setDoorStatus] = useState<"LOCKED" | "UNLOCKED">("LOCKED");
   const [unlocking, setUnlocking] = useState<boolean>(false);
   const [completingCheckIn, setCompletingCheckIn] = useState<boolean>(false);
   const [checkInCompletedAnimation, setCheckInCompletedAnimation] = useState<boolean>(false);
   const [digitalKeyGenerated, setDigitalKeyGenerated] = useState<boolean>(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const qrPayload = keyDetails?.qrPayload;
+    if (!qrPayload) {
+      setQrCodeUrl("");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    QRCode.toDataURL(JSON.stringify(qrPayload), {
+      width: 320,
+      margin: 2,
+      color: { dark: "#5b3a29", light: "#fffaf0" },
+    })
+      .then((url) => {
+        if (!cancelled) setQrCodeUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setQrCodeUrl("");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [keyDetails?.qrPayload]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -538,8 +567,8 @@ export default function CheckInVerification() {
         setPaymentDone(true);
         qc.invalidateQueries({ queryKey: ["payments"] });
         qc.invalidateQueries({ queryKey: ["reservations"] });
-        toast.success("Payment verified successfully. You can now complete check-in.");
-        setStep(3);
+        toast.success("Payment verified successfully. Completing check-in and issuing your digital key...");
+        await handleCompleteCheckIn();
       });
     } catch (err: any) {
       toast.error(err?.response?.data?.error || "Network error while creating payment order.");
@@ -565,8 +594,8 @@ export default function CheckInVerification() {
       setPaymentDone(true);
       qc.invalidateQueries({ queryKey: ["payments"] });
       qc.invalidateQueries({ queryKey: ["reservations"] });
-      toast.success(data.message || "Payment recorded. You can now complete check-in.");
-      setStep(3);
+      toast.success(data.message || "Payment recorded. Completing check-in and issuing your digital key...");
+      await handleCompleteCheckIn();
     } catch (err: any) {
       toast.error(err?.response?.data?.error || "Network error while recording payment.");
     } finally {
@@ -590,13 +619,13 @@ export default function CheckInVerification() {
         return;
       }
 
-      if (!data.digitalPin || !data.lockId || !data.keyPayload) {
+      if (!data.digitalPin || !data.lockId || !data.qrPayload) {
         toast.error("The server did not return a valid digital key.");
         return;
       }
       setStep(3);
       setCheckInCompletedAnimation(true);
-      setKeyDetails({ digitalPin: data.digitalPin, lockId: data.lockId, keyPayload: data.keyPayload });
+      setKeyDetails({ digitalPin: data.digitalPin, lockId: data.lockId, qrPayload: data.qrPayload });
       setDigitalKeyGenerated(true);
       toast.success("Check-in completed successfully!");
 
@@ -614,36 +643,7 @@ export default function CheckInVerification() {
     }
   };
 
-  // Step 3 of Completion: Issue Digital Lock Key & Navigate to Digital Key Page
-  const handleGenerateDigitalKey = async () => {
-    if (!selectedResId) return;
-    setGeneratingKey(true);
-    try {
-      const res = await api.post("/checkin/generate-lock-key", { reservationId: selectedResId });
-
-      const data = res.data;
-      setGeneratingKey(false);
-      if (!data.success || !data.digitalPin || !data.lockId || !data.keyPayload) {
-        throw new Error(data.error || "The server did not return a valid digital key.");
-      }
-
-      setKeyDetails({ digitalPin: data.digitalPin, lockId: data.lockId, keyPayload: data.keyPayload });
-      setDigitalKeyGenerated(true);
-      toast.success("Digital Room Key & Access PIN generated!");
-
-      if (data.success) {
-        qc.invalidateQueries({ queryKey: ["reservations"] });
-        qc.invalidateQueries({ queryKey: ["payments"] });
-        qc.invalidateQueries({ queryKey: ["rooms"] });
-        qc.invalidateQueries({ queryKey: ["dashboard"] });
-      }
-    } catch (err: any) {
-      setGeneratingKey(false);
-      toast.error(err?.response?.data?.error || err?.message || "Unable to generate the digital key.");
-    }
-  };
-
-  // Simulate Unlock Door
+  // Validate the application credential through the server-side authorization flow.
   const handleSimulateUnlock = async () => {
     if (!selectedResId) return;
     setUnlocking(true);
@@ -658,18 +658,59 @@ export default function CheckInVerification() {
 
       if (data.success) {
         setDoorStatus("UNLOCKED");
-        toast.success(data.message || "Door unlocked successfully! Access granted.");
+        toast.success(data.message || "Application key validated successfully.");
         setTimeout(() => setDoorStatus("LOCKED"), 4000);
       } else {
-        setDoorStatus("UNLOCKED");
-        toast.success("Door unlocked successfully! Access granted.");
-        setTimeout(() => setDoorStatus("LOCKED"), 4000);
+        setDoorStatus("LOCKED");
+        toast.error(data.message || "Application key validation failed.");
       }
     } catch (err) {
       setUnlocking(false);
-      setDoorStatus("UNLOCKED");
-      toast.success("Door unlocked successfully! Access granted.");
-      setTimeout(() => setDoorStatus("LOCKED"), 4000);
+      setDoorStatus("LOCKED");
+      toast.error((err as any)?.response?.data?.error || "Application key validation failed.");
+    }
+  };
+
+  const handleDownloadCheckInDetails = async () => {
+    if (!selectedReservation || !keyDetails?.qrPayload || !qrCodeUrl) {
+      toast.error("Check-in details are not ready to download yet.");
+      return;
+    }
+
+    setDownloadingDetails(true);
+    try {
+      const guestName = selectedReservation.guest
+        ? `${selectedReservation.guest.firstName || ""} ${selectedReservation.guest.lastName || ""}`.trim()
+        : "Guest";
+      const roomNumber = selectedReservation.roomNumber || selectedReservation.room?.room_number || selectedReservation.roomId || "Unavailable";
+      const roomType = selectedReservation.room?.room_type?.name || selectedReservation.room?.type || selectedReservation.roomType || "Unavailable";
+      const escapeHtml = (value: unknown) => String(value ?? "Unavailable")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+      const html = `<!doctype html>
+<html><head><meta charset="utf-8"><title>InnKeeper Check-In Details</title>
+<style>body{font-family:Georgia,serif;color:#4a3022;background:#fffaf0;padding:40px;max-width:760px;margin:auto}h1{color:#6f4b36;border-bottom:2px solid #c4a882;padding-bottom:12px}.section{border:1px solid #d8c4a8;padding:18px;margin:18px 0;background:#fffdf8}.row{display:flex;justify-content:space-between;border-bottom:1px solid #eee2d2;padding:8px 0}.label{color:#80644d}.value{font-weight:700}.qr{text-align:center;margin:24px}.qr img{width:260px;border:8px solid #fff;border-radius:8px;box-shadow:0 2px 12px #b89572}.note{font-size:12px;color:#80644d;text-align:center}</style></head>
+<body><h1>InnKeeper Check-In Details</h1>
+<div class="section"><h2>Guest Details</h2><div class="row"><span class="label">Guest name</span><span class="value">${escapeHtml(guestName)}</span></div><div class="row"><span class="label">Reservation ID</span><span class="value">RES-${escapeHtml(selectedReservation.id)}</span></div><div class="row"><span class="label">Check-in status</span><span class="value">Checked In</span></div></div>
+<div class="section"><h2>Room Details</h2><div class="row"><span class="label">Room number</span><span class="value">${escapeHtml(roomNumber)}</span></div><div class="row"><span class="label">Room type</span><span class="value">${escapeHtml(roomType)}</span></div><div class="row"><span class="label">Check-in</span><span class="value">${escapeHtml(selectedReservation.checkIn)}</span></div><div class="row"><span class="label">Check-out</span><span class="value">${escapeHtml(selectedReservation.checkOut)}</span></div></div>
+<div class="section"><h2>Verification</h2><div class="row"><span class="label">Identity verification</span><span class="value">Verified</span></div><div class="row"><span class="label">Face verification</span><span class="value">Verified</span></div><div class="row"><span class="label">Payment</span><span class="value">Confirmed</span></div></div>
+<div class="section"><h2>Digital Key</h2><div class="row"><span class="label">Digital key status</span><span class="value">Ready</span></div><div class="row"><span class="label">Lock ID</span><span class="value">${escapeHtml(keyDetails.lockId)}</span></div><div class="row"><span class="label">Room Door PIN</span><span class="value">${escapeHtml(keyDetails.digitalPin)}</span></div><div class="qr"><img src="${qrCodeUrl}" alt="Secure digital access credential QR code"><h3>Scan to Access</h3><p>Secure Digital Access Credential</p></div><p class="note">Physical smart-lock integration is not connected.</p></div>
+</body></html>`;
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `InnKeeper_CheckIn_Details_RES-${selectedReservation.id}.html`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      toast.success("Check-in details downloaded.");
+    } catch {
+      toast.error("Unable to download check-in details. Please try again.");
+    } finally {
+      setDownloadingDetails(false);
     }
   };
 
@@ -803,7 +844,7 @@ export default function CheckInVerification() {
 
                 <div className="pt-1">
                   <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-[#F3EDE4]/70 text-[#8B6748] dark:text-[#DDBC9E] text-xs font-bold border border-[#B89572]/30">
-                    ✓ {t("roomDrawer.roomNumber", { number: selectedReservation.roomNumber || selectedReservation.room?.room_number || selectedReservation.room?.number || selectedReservation.roomId || "101" })} · {t("reservations.checkedIn")}
+                    ✓ {t("roomDrawer.roomNumber", { number: selectedReservation.roomNumber || selectedReservation.room?.room_number || selectedReservation.room?.number || selectedReservation.roomId || "Unavailable" })} · {t("reservations.checkedIn")}
                   </span>
                 </div>
               </div>
@@ -843,7 +884,7 @@ export default function CheckInVerification() {
 
 
       {/* Conditionally Render Workflow Steps ONLY when a Candidate is selected and NOT already checked in and NOT cancelled */}
-      {selectedResId && !isSelectedGuestCheckedIn && !isSelectedGuestCancelled && (
+      {selectedResId && (!isSelectedGuestCheckedIn || checkInCompletedAnimation) && !isSelectedGuestCancelled && (
         <>
           {/* STEP 1: ID Verification */}
           {step === 1 && (
@@ -1148,7 +1189,7 @@ export default function CheckInVerification() {
       )}
 
 
-          {/* STEP 3: Complete Check-In & Digital Lock Passcard Flow */}
+          {/* STEP 3: Complete Check-In & Digital Key Delivery */}
           {step === 3 && selectedReservation && (
             <div className="space-y-6">
               {!checkInCompletedAnimation ? (
@@ -1180,7 +1221,7 @@ export default function CheckInVerification() {
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">{t("checkin.assignedRoomLabel")}</span>
                       <span className="font-bold text-[#8B6748] dark:text-[#DDBC9E]">
-                        {t("dashboard.rooms")} #{selectedReservation.roomNumber || selectedReservation.room?.room_number || selectedReservation.room?.number || selectedReservation.roomId || "101"}
+                        {t("dashboard.rooms")} #{selectedReservation.roomNumber || selectedReservation.room?.room_number || selectedReservation.room?.number || selectedReservation.roomId || "Unavailable"}
                       </span>
                     </div>
                   </div>
@@ -1201,44 +1242,8 @@ export default function CheckInVerification() {
                     )}
                   </Button>
                 </div>
-              ) : !digitalKeyGenerated ? (
-                /* Step 4: Check-In Completed Animation Page */
-                <div className="bg-card border border-[#B89572]/30 rounded-3xl p-10 shadow-xl text-center max-w-xl mx-auto space-y-6 animate-in fade-in zoom-in duration-300">
-                  <div className="relative w-24 h-24 mx-auto flex items-center justify-center">
-                    <span className="absolute inset-0 rounded-full bg-[#B89572]/20 animate-ping" />
-                    <div className="w-24 h-24 rounded-full bg-[#8B6748] text-white flex items-center justify-center shadow-lg shadow-[#8B6748]/30 z-10">
-                      <Sparkles className="w-12 h-12 animate-bounce" />
-                    </div>
-                  </div>
-
-                  <div>
-                    <span className="text-xs font-extrabold tracking-widest uppercase text-[#8B6748] dark:text-[#DDBC9E] bg-[#F3EDE4]/70 px-4 py-1.5 rounded-full">
-                      {t("checkin.statusCheckedIn")}
-                    </span>
-                    <h2 className="text-2xl font-black text-foreground mt-4">{t("checkin.checkInSuccessTitle")}</h2>
-                    <p className="text-xs text-muted-foreground mt-2">
-                      {t("checkin.checkInSuccessSub")}
-                    </p>
-                  </div>
-
-                  <Button
-                    onClick={handleGenerateDigitalKey}
-                    disabled={generatingKey}
-                    className="w-full h-14 bg-[#8B6748] hover:bg-[#6B563E] text-white rounded-2xl text-base font-extrabold shadow-xl shadow-[#8B6748]/30 flex items-center justify-center gap-3 cursor-pointer"
-                  >
-                    {generatingKey ? (
-                      <>
-                        <RefreshCw className="w-5 h-5 animate-spin" /> {t("checkin.generatingDigitalKey")}
-                      </>
-                    ) : (
-                      <>
-                        <KeyRound className="w-6 h-6" /> {t("checkin.generateDigitalKeyBtn")} <ChevronRight className="w-5 h-5" />
-                      </>
-                    )}
-                  </Button>
-                </div>
               ) : (
-                /* Stage 5: Digital Key Page (Matching Exact Reference Layout) */
+                /* Digital Key Page */
                 <div className="space-y-6 animate-in fade-in duration-300">
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                     {/* Left Sidebar Card: Check-In Active */}
@@ -1260,66 +1265,39 @@ export default function CheckInVerification() {
                             </span>
                           </div>
                           <div className="flex justify-between items-center">
-                            <span className="text-muted-foreground font-medium">{t("common.status")}:</span>
-                            <span className="font-bold text-blue-600 dark:text-blue-400">{t("reservations.checkedIn")}</span>
+                            <span className="text-muted-foreground font-medium">Identity:</span>
+                            <span className="font-bold text-emerald-600 dark:text-emerald-400">Identity Verified</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-muted-foreground font-medium">Payment:</span>
+                            <span className="font-bold text-emerald-600 dark:text-emerald-400">Payment Confirmed</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-muted-foreground font-medium">Check-in:</span>
+                            <span className="font-bold text-emerald-700 dark:text-emerald-400">{t("reservations.checkedIn")}</span>
                           </div>
                           <div className="flex justify-between items-center">
                             <span className="text-muted-foreground font-medium">{t("checkin.assignedRoomLabel")}</span>
-                            <span className="font-bold text-blue-600 dark:text-blue-400 font-mono">
-                              {t("dashboard.rooms")} #{selectedReservation.roomNumber || selectedReservation.room?.room_number || selectedReservation.room?.number || selectedReservation.roomId || "101"}
+                            <span className="font-bold text-[#8B6748] font-mono">
+                              {t("dashboard.rooms")} #{selectedReservation.roomNumber || selectedReservation.room?.room_number || selectedReservation.room?.number || selectedReservation.roomId || "Unavailable"}
                             </span>
                           </div>
                         </div>
                       </div>
 
                       <div className="space-y-3 pb-2">
-                        <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl text-center">
-                          <p className="text-xs font-extrabold text-blue-600 dark:text-blue-400">{t("checkin.digitalKeyActiveBadge")}</p>
-                          <p className="text-[10px] text-muted-foreground mt-0.5">{t("checkin.validForStay")}</p>
+                        <div className="p-4 bg-[#F3EDE4]/70 border border-[#B89572]/40 rounded-2xl text-center shadow-sm">
+                          <p className="text-xs font-extrabold text-emerald-600 dark:text-emerald-400">Digital Key Ready</p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">Secure application credential for this stay</p>
                         </div>
 
                         <Button
-                          onClick={() => {
-                            const guestName = selectedReservation.guest ? `${selectedReservation.guest.firstName} ${selectedReservation.guest.lastName}` : "Guest";
-                            const roomNum = selectedReservation.roomNumber || selectedReservation.roomId || "101";
-                            const pin = keyDetails?.digitalPin || "395676";
-                            const lockId = keyDetails?.lockId || `LOCK-ROOM-${roomNum}-4469`;
-                            const content = `================================================
-INNKEEPER MOTELS - OFFICIAL CHECK-IN RECEIPT
-================================================
-Date           : ${new Date().toLocaleString()}
-Reservation ID : RES-${String(selectedReservation.id).padStart(4, '0')}
-Guest Name     : ${guestName}
-Assigned Room  : Room #${roomNum}
-Lock Serial ID : ${lockId}
-
-CHECK-IN STATUS DETAILS:
-------------------------------------------------
-1. ID Verification  : VERIFIED (Pass)
-2. Payment Process  : AUTHORIZED & PAID
-3. Check-In Status  : CHECKED-IN (Complete)
-
-DIGITAL KEY ACCESS CODE:
-------------------------------------------------
-Door Lock PIN      : ${pin}
-Encryption Standard: AES-256 GCM
-
-================================================
-Thank you for staying with InnKeeper Motels!
-================================================`;
-                            const blob = new Blob([content], { type: "text/plain" });
-                            const url = URL.createObjectURL(blob);
-                            const a = document.createElement("a");
-                            a.href = url;
-                            a.download = `CheckIn_Receipt_RES-${selectedReservation.id}.txt`;
-                            a.click();
-                            URL.revokeObjectURL(url);
-                            toast.success("Receipt downloaded!");
-                          }}
+                          onClick={handleDownloadCheckInDetails}
+                          disabled={downloadingDetails}
                           variant="outline"
                           className="w-full rounded-xl text-xs font-bold gap-2 py-2.5"
                         >
-                          <Download className="w-4 h-4" /> {t("checkin.downloadReceipt")}
+                          {downloadingDetails ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Download Check-In Details
                         </Button>
                       </div>
                     </div>
@@ -1327,35 +1305,36 @@ Thank you for staying with InnKeeper Motels!
                     {/* Right Main Column */}
                     <div className="lg:col-span-8 space-y-6">
                       {/* Top Passcard Box */}
-                      <div className="bg-gradient-to-br from-[#0c1322] via-[#0f172a] to-[#1e293b] border border-slate-700/60 text-white rounded-3xl p-6 shadow-2xl space-y-6">
-                        <div className="flex justify-between items-center border-b border-slate-700/60 pb-4">
+                      <div className="bg-gradient-to-br from-[#fffaf0] via-[#f3ede4] to-[#ead9c2] border border-[#B89572]/50 text-[#4a3022] rounded-3xl p-6 shadow-xl shadow-[#8B6748]/10 space-y-6">
+                        <div className="flex justify-between items-center border-b border-[#B89572]/40 pb-4">
                           <div className="flex items-center gap-2.5">
-                            <Smartphone className="w-5 h-5 text-blue-400" />
-                            <span className="font-bold text-sm tracking-wider uppercase text-slate-200">{t("checkin.contactlessPass")}</span>
+                            <Smartphone className="w-5 h-5 text-[#8B6748]" />
+                            <span className="font-bold text-sm tracking-wider uppercase text-[#6f4b36]">{t("checkin.contactlessPass")}</span>
                           </div>
-                          <span className="text-[11px] px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 font-mono font-bold">
-                            AES-256 GCM
+                          <span className="text-[11px] px-3 py-1 rounded-full bg-white/70 text-[#6f4b36] border border-[#B89572]/50 font-mono font-bold">
+                            SERVER-ISSUED
                           </span>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-12 gap-6 items-center">
                           <div className="sm:col-span-7 space-y-4">
                             <div>
-                              <p className="text-[11px] text-slate-400 uppercase font-semibold tracking-wider">{t("checkin.roomDoorPIN")}</p>
-                              <div className="text-4xl font-mono font-extrabold tracking-widest text-blue-400 mt-1">
-                                {keyDetails?.digitalPin || "395676"}
+                              <p className="text-[11px] text-[#80644d] uppercase font-semibold tracking-wider">{t("checkin.roomDoorPIN")}</p>
+                              <div className="text-4xl font-mono font-extrabold tracking-widest text-[#8B6748] mt-1">
+                                {keyDetails?.digitalPin || "Unavailable"}
                               </div>
                             </div>
 
-                            <div className="space-y-1 text-xs text-slate-300">
-                              <p><span className="text-slate-400 font-medium">{t("checkin.lockId")}</span> <span className="font-mono text-slate-200">{keyDetails?.lockId || `LOCK-ROOM-${selectedReservation.roomNumber || selectedReservation.roomId || "101"}-4469`}</span></p>
-                              <p><span className="text-slate-400 font-medium">Payload Hash:</span> <span className="font-mono text-slate-200">AES256-ACTIVE-KEY...</span></p>
+                            <div className="space-y-1 text-xs text-[#6f4b36]">
+                              <p><span className="text-[#80644d] font-medium">{t("checkin.lockId")}</span> <span className="font-mono text-[#4a3022]">{keyDetails?.lockId || "Unavailable"}</span></p>
+                              <p><span className="text-[#80644d] font-medium">Credential status:</span> <span className="font-mono text-emerald-700">Server-issued and active</span></p>
                             </div>
                           </div>
 
-                          <div className="sm:col-span-5 flex flex-col items-center justify-center p-4 bg-white/5 rounded-2xl border border-white/10 text-center">
-                            <div className="bg-white p-3 rounded-xl shadow-lg mb-2">
-                              <svg className="w-24 h-24 text-slate-900" viewBox="0 0 29 29" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <div className="sm:col-span-5 flex flex-col items-center justify-center p-4 bg-[#fffdf8] rounded-2xl border border-[#B89572]/60 text-center shadow-md">
+                            <div className="bg-[#fffaf0] p-3 rounded-xl shadow-lg mb-2 border border-[#B89572]/50">
+                              {qrCodeUrl && <img src={qrCodeUrl} alt="Secure digital access credential" className="w-52 h-52 object-contain" />}
+                              {false && <svg className="w-24 h-24 text-slate-900" viewBox="0 0 29 29" fill="none" xmlns="http://www.w3.org/2000/svg">
                                 {/* Top Left Finder Pattern */}
                                 <rect x="1" y="1" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" />
                                 <rect x="3" y="3" width="3" height="3" fill="currentColor" />
@@ -1418,21 +1397,23 @@ Thank you for staying with InnKeeper Motels!
                                 <rect x="13" y="26" width="3" height="2" fill="currentColor" />
                                 <rect x="20" y="26" width="2" height="2" fill="currentColor" />
                                 <rect x="23" y="26" width="5" height="2" fill="currentColor" />
-                              </svg>
+                              </svg>}
                             </div>
-                            <p className="text-[10px] text-slate-400 font-medium leading-tight">{t("checkin.scanNFC")}</p>
+                            <p className="text-xs font-bold text-[#6f4b36]">Scan to Access</p>
+                            <p className="text-[10px] text-[#80644d] font-medium leading-tight mt-1">Secure Digital Access Credential</p>
+                            <p className="text-[10px] text-[#80644d] font-medium leading-tight mt-2">Physical smart-lock integration is not connected.</p>
                           </div>
                         </div>
                       </div>
 
-                      {/* Bottom Smart Door Lock Simulator Box */}
-                      <div className="bg-card border border-border rounded-3xl p-8 shadow-sm text-center space-y-6">
+                      {/* Application key validation; no physical lock connection is claimed. */}
+                      <div className="bg-[#fffaf0] border border-[#B89572]/40 rounded-3xl p-8 shadow-sm text-center space-y-6">
                         <div>
                           <h3 className="font-black text-xl flex items-center justify-center gap-2 text-foreground">
-                            <Lock className="w-5 h-5 text-blue-500" /> {t("checkin.smartDoorSimulator")}
+                            <Lock className="w-5 h-5 text-[#8B6748]" /> Application Key Validation
                           </h3>
                           <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
-                            {t("checkin.smartDoorSub")} #{selectedReservation.roomNumber || selectedReservation.roomId || "101"}.
+                            Validate the server-issued application credential for Room #{selectedReservation.roomNumber || selectedReservation.room?.room_number || selectedReservation.roomId || "Unavailable"}. Physical smart-lock integration is not connected.
                           </p>
                         </div>
 
@@ -1440,24 +1421,24 @@ Thank you for staying with InnKeeper Motels!
                           <div className={`w-20 h-20 rounded-full flex items-center justify-center shadow-lg transition-all ${
                             doorStatus === "UNLOCKED"
                               ? "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30"
-                              : "bg-[#182234] text-slate-300 border border-slate-700"
+                              : "bg-[#f3ede4] text-[#8B6748] border border-[#B89572]/50"
                           }`}>
                             {doorStatus === "UNLOCKED" ? (
                               <Unlock className="w-10 h-10 text-emerald-500" />
                             ) : (
-                              <Lock className="w-10 h-10 text-slate-200" />
+                              <Lock className="w-10 h-10 text-[#8B6748]" />
                             )}
                           </div>
 
                           <p className="text-sm font-bold text-foreground">
-                            {t("checkin.doorStatusLabel")} <span className={doorStatus === "UNLOCKED" ? "text-emerald-500" : "text-slate-400 font-extrabold"}>{doorStatus === "UNLOCKED" ? t("checkin.doorUnlocked") : "LOCKED"}</span>
+                            Credential status: <span className={doorStatus === "UNLOCKED" ? "text-emerald-500" : "text-slate-400 font-extrabold"}>{doorStatus === "UNLOCKED" ? "VALIDATED" : "NOT VALIDATED"}</span>
                           </p>
                         </div>
 
                         <Button
                           onClick={handleSimulateUnlock}
                           disabled={unlocking}
-                          className="bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs font-extrabold px-8 py-3.5 gap-2 shadow-lg shadow-blue-500/25 cursor-pointer"
+                          className="bg-[#8B6748] hover:bg-[#6B563E] text-white rounded-2xl text-xs font-extrabold px-8 py-3.5 gap-2 shadow-lg shadow-[#8B6748]/25 cursor-pointer"
                         >
                           {unlocking ? (
                             <>
@@ -1465,7 +1446,7 @@ Thank you for staying with InnKeeper Motels!
                             </>
                           ) : (
                             <>
-                              {t("checkin.simulateUnlock")} <KeyRound className="w-4 h-4" />
+                              Validate Application Key <KeyRound className="w-4 h-4" />
                             </>
                           )}
                         </Button>
