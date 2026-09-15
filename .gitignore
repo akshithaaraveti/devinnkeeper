@@ -26,3 +26,9 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 .vscode/
+
+# Python virtual environments and cache
+.venv/
+**/.venv/
+__pycache__/
+**/__pycache__/

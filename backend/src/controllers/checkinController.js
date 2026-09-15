@@ -5,6 +5,7 @@ import { prisma } from '../utils/db.js';
 import { createNotification, NotificationType, NotificationPriority } from '../utils/notificationService.js';
 import crypto from 'crypto';
 import { verifyDrivingLicenceWithGemini } from '../services/geminiVerificationService.js';
+import { verifyWithDeepFace } from '../services/deepfaceVerificationService.js';
 import { verifyCheckInAccessToken } from '../utils/checkinAccess.js';
 
 const lockService = new LockService();
@@ -188,54 +189,7 @@ export async function createBookingWithPayment(req, res) {
   }
 }
 
-function compareFacesServer(dlData, selfieData) {
-  if (!dlData || !selfieData) {
-    return { isMatch: false, score: 0, reason: 'Missing image data' };
-  }
-
-  const raw1 = dlData.includes('base64,') ? dlData.split('base64,')[1] : dlData;
-  const raw2 = selfieData.includes('base64,') ? selfieData.split('base64,')[1] : selfieData;
-
-  if (raw1.trim() === raw2.trim()) {
-    return { isMatch: true, score: 100, reason: 'Identical image files verified successfully' };
-  }
-
-  const buf1 = Buffer.from(raw1, 'base64');
-  const buf2 = Buffer.from(raw2, 'base64');
-
-  if (buf1.length < 50 || buf2.length < 50) {
-    return { isMatch: false, score: 20, reason: 'Image payload is invalid or empty' };
-  }
-
-  if (buf1.equals(buf2)) {
-    return { isMatch: true, score: 100, reason: 'Identical byte match verified successfully' };
-  }
-
-  const sampleSize = Math.min(2000, buf1.length, buf2.length);
-  const step1 = Math.max(1, Math.floor(buf1.length / sampleSize));
-  const step2 = Math.max(1, Math.floor(buf2.length / sampleSize));
-
-  let matchingBytes = 0;
-  for (let i = 0; i < sampleSize; i++) {
-    const b1 = buf1[i * step1];
-    const b2 = buf2[i * step2];
-    if (Math.abs(b1 - b2) <= 15) {
-      matchingBytes++;
-    }
-  }
-
-  const similarityScore = Math.round((matchingBytes / sampleSize) * 100);
-  const isMatch = similarityScore >= 80;
-
-  return {
-    isMatch,
-    score: similarityScore,
-    reason: isMatch ? 'Biometric images verified successfully' : 'Verification failed: Facial features do not match'
-  };
-}
-
-// Step 1: Verify the Driving Licence document with Gemini and fall back to
-// the existing biometric server comparison helper for compatibility.
+// Step 1: Verify the Driving Licence document with Gemini and the guest's face with DeepFace.
 export async function verifyGuestId(req, res) {
   try {
     const { reservationId, guestId, dlImageUrl, selfieImageUrl } = req.body;
@@ -284,29 +238,75 @@ export async function verifyGuestId(req, res) {
       return res.status(400).json({ error: 'A Driving Licence image is required.' });
     }
 
+    let faceVerification;
+    if (verification.verified) {
+      if (typeof selfieImageUrl !== 'string' || !selfieImageUrl.trim()) {
+        faceVerification = {
+          verified: false,
+          reason: 'A selfie image is required for face verification.'
+        };
+      } else {
+        try {
+          faceVerification = await verifyWithDeepFace({
+            idImageData: dlImageUrl,
+            selfieImageData: selfieImageUrl,
+          });
+        } catch {
+          faceVerification = {
+            verified: false,
+            reason: 'Face verification could not be completed.'
+          };
+        }
+      }
+    } else {
+      faceVerification = {
+        verified: false,
+        reason: 'Face verification was not attempted because the Driving Licence was not verified.'
+      };
+    }
+
+    const documentVerified = verification.verified === true;
+    const faceVerified = faceVerification.verified === true;
+    const overallVerified = documentVerified && faceVerified;
+    const reason = overallVerified
+      ? faceVerification.reason || verification.reason
+      : (!documentVerified ? verification.reason : faceVerification.reason);
+
     const reservation = await prisma.reservation.update({
       where: { id: Number(reservationId) },
       data: {
         dlImageUrl: dlImageUrl.slice(0, 5000),
         selfieImageUrl: typeof selfieImageUrl === 'string' ? selfieImageUrl.slice(0, 5000) : null,
-        verificationStatus: verification.verified ? 'VERIFIED' : 'REJECTED',
+        verificationStatus: overallVerified ? 'VERIFIED' : 'REJECTED',
       },
       include: { guest: true }
     });
 
-    if (!verification.verified) {
+    const verificationResult = {
+      verified: overallVerified,
+      documentVerified,
+      faceVerified,
+      ...(typeof faceVerification.distance === 'number' ? { faceDistance: faceVerification.distance } : {}),
+      ...(typeof faceVerification.threshold === 'number' ? { faceThreshold: faceVerification.threshold } : {}),
+      ...(typeof faceVerification.model === 'string' ? { model: faceVerification.model } : {}),
+      reason: reason || 'Identity verification failed.',
+    };
+
+    if (!overallVerified) {
       return res.status(400).json({
         success: false,
-        message: verification.reason,
+        message: verificationResult.reason,
         verificationStatus: 'REJECTED',
+        verification: verificationResult,
         reservation
       });
     }
 
     res.json({
       success: true,
-      message: verification.reason,
+      message: verificationResult.reason,
       verificationStatus: reservation.verificationStatus,
+      verification: verificationResult,
       reservation
     });
   } catch (err) {
