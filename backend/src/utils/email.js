@@ -51,6 +51,7 @@ export async function sendPasswordResetEmail({ to, token, name }) {
     const transporter = nodemailer.createTransport({
       host: smtpHost,
       port: portNum,
+      family: 4,
       secure: isSecure,
       auth: {
         user: smtpUser,

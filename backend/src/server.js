@@ -108,10 +108,15 @@ setSocketIo(io);
 
 const port = process.env.PORT || 5000;
 
-initializeDb().then(async () => {
-  await verifyEmailConfigOnStartup();
-  httpServer.listen(port, () => {
-    console.log(`Server running on port ${port}`);
-    console.log(`Socket.IO ready on port ${port}`);
-  });
+httpServer.listen(port, '0.0.0.0', () => {
+  console.log(`Server running on port ${port}`);
+  console.log(`Socket.IO ready on port ${port}`);
 });
+
+initializeDb()
+  .then(async () => {
+    await verifyEmailConfigOnStartup();
+  })
+  .catch((error) => {
+    console.error('Startup initialization failed:', error);
+  });
