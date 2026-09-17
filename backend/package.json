@@ -9,7 +9,8 @@
     "start": "node src/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev --name init",
-    "prisma:seed": "node prisma/seed.js"
+    "prisma:seed": "node prisma/seed.js",
+    "prisma:add-rooms": "node prisma/addRooms.js"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",
