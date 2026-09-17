@@ -1,4 +1,35 @@
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
+
+function getResendConfig() {
+  const apiKey = String(process.env.RESEND_API_KEY || '').trim();
+  const from = String(process.env.EMAIL_FROM || '').trim();
+  const missing = [];
+  if (!apiKey) missing.push('RESEND_API_KEY');
+  if (!from) missing.push('EMAIL_FROM');
+  return { apiKey, from, missing };
+}
+
+export async function sendEmailWithResend({ to, from, subject, text, html }) {
+  const config = getResendConfig();
+  if (config.missing.length > 0) {
+    throw new Error(`Resend configuration missing: ${config.missing.join(', ')}`);
+  }
+
+  const resend = new Resend(config.apiKey);
+  const { data, error } = await resend.emails.send({
+    from: from || config.from,
+    to,
+    subject,
+    text,
+    html,
+  });
+
+  if (error) {
+    throw new Error(error.message || 'Resend email delivery failed.');
+  }
+
+  return data;
+}
 
 /**
  * Sends a password reset email to a user with a secure reset link.
@@ -19,55 +50,22 @@ export async function sendPasswordResetEmail({ to, token, name }) {
   const resetUrl = `${appBaseUrl.replace(/\/$/, '')}/reset-password?token=${encodeURIComponent(token)}`;
   const firstName = name ? name.trim().split(' ')[0] : 'User';
 
-  const smtpHost = process.env.EMAIL_HOST || process.env.SMTP_HOST || 'smtp.gmail.com';
-  const smtpPort = process.env.EMAIL_PORT || process.env.SMTP_PORT || '587';
-  const smtpUser = process.env.EMAIL_USER || process.env.SMTP_USER;
-  const smtpPass = process.env.EMAIL_PASSWORD || process.env.SMTP_PASS;
-  const smtpFrom = process.env.EMAIL_FROM || process.env.SMTP_FROM || (smtpUser ? `"InnKeeper Support" <${smtpUser}>` : null);
-  const portNum = Number(smtpPort);
-  const isSecure = process.env.EMAIL_SECURE === 'true' || process.env.SMTP_SECURE === 'true' || portNum === 465;
-
-  const missingVars = [];
-  if (!smtpHost || smtpHost === 'smtp.gmail.com' && !process.env.EMAIL_HOST && !process.env.SMTP_HOST) missingVars.push('EMAIL_HOST/SMTP_HOST');
-  if (!smtpPort || smtpPort === '587' && !process.env.EMAIL_PORT && !process.env.SMTP_PORT) missingVars.push('EMAIL_PORT/SMTP_PORT');
-  if (!smtpUser) missingVars.push('EMAIL_USER/SMTP_USER');
-  if (!smtpPass) missingVars.push('EMAIL_PASSWORD/SMTP_PASS');
-  if (!smtpFrom) missingVars.push('EMAIL_FROM/SMTP_FROM');
-
-  if (missingVars.length > 0) {
-    missingVars.forEach((varName) => {
+  const config = getResendConfig();
+  if (config.missing.length > 0) {
+    config.missing.forEach((varName) => {
       console.error(`[Email Service] Missing ${varName}`);
     });
-    const errorMsg = `SMTP credentials (${missingVars.join(', ')}) are missing in .env`;
-    return { success: false, error: errorMsg, resetUrl, deliveredViaSmtp: false };
+    const errorMsg = `Resend configuration (${config.missing.join(', ')}) is missing in .env`;
+    return { success: false, error: errorMsg, resetUrl, deliveredViaSmtp: false, deliveredViaResend: false };
   }
 
-  console.log(`[Email Config] EMAIL_HOST configured:`, !!smtpHost);
-  console.log(`[Email Config] EMAIL_USER configured:`, !!smtpUser);
-  console.log(`[Email Config] EMAIL_PASSWORD configured:`, !!smtpPass);
-  console.log(`[Email Service] Connecting to SMTP server (${smtpHost}:${portNum})...`);
+  console.log('[Email Config] RESEND_API_KEY configured:', true);
+  console.log('[Email Config] EMAIL_FROM configured:', true);
+  console.log(`[Email Service] Attempting to send password reset email to ${to} via Resend...`);
 
   try {
-    const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: portNum,
-      family: 4,
-      secure: isSecure,
-      auth: {
-        user: smtpUser,
-        pass: smtpPass,
-      },
-      tls: {
-        rejectUnauthorized: process.env.NODE_ENV === 'production',
-      },
-    });
-
-    await transporter.verify();
-    console.log(`[Email Service] SMTP connection verified`);
-    console.log(`[Email Service] Attempting to send password reset email to ${to}...`);
-
-    const info = await transporter.sendMail({
-      from: smtpFrom,
+    const info = await sendEmailWithResend({
+      from: config.from,
       to,
       subject: 'Reset your InnKeeper password',
       text: [
@@ -179,11 +177,11 @@ export async function sendPasswordResetEmail({ to, token, name }) {
       `,
     });
 
-    console.log(`[Email Service] Password reset email sent successfully (Message ID: ${info.messageId})`);
-    return { success: true, messageId: info.messageId, resetUrl, deliveredViaSmtp: true };
+    console.log(`[Email Service] Password reset email sent successfully (Message ID: ${info.id})`);
+    return { success: true, messageId: info.id, resetUrl, deliveredViaSmtp: false, deliveredViaResend: true };
   } catch (error) {
-    console.error(`[Email Service] SMTP Error: ${error.message}`);
-    return { success: false, error: error.message, resetUrl, deliveredViaSmtp: false };
+    console.error(`[Email Service] Resend Error: ${error.message}`);
+    return { success: false, error: error.message, resetUrl, deliveredViaSmtp: false, deliveredViaResend: false };
   }
 }
 
@@ -191,40 +189,17 @@ export async function sendPasswordResetEmail({ to, token, name }) {
  * Safely verifies email configuration on backend startup without exposing secrets.
  */
 export async function verifyEmailConfigOnStartup() {
-  const smtpHost = process.env.EMAIL_HOST || process.env.SMTP_HOST;
-  const smtpPort = process.env.EMAIL_PORT || process.env.SMTP_PORT || '587';
-  const smtpUser = process.env.EMAIL_USER || process.env.SMTP_USER;
-  const smtpPass = process.env.EMAIL_PASSWORD || process.env.SMTP_PASS;
-  const smtpFrom = process.env.EMAIL_FROM || process.env.SMTP_FROM || (smtpUser ? `"InnKeeper Support" <${smtpUser}>` : null);
+  const config = getResendConfig();
 
   console.log('[Email Config] Running from:', process.cwd());
-  console.log('[Email Config] EMAIL_HOST configured:', !!smtpHost);
-  console.log('[Email Config] EMAIL_PORT configured:', !!smtpPort);
-  console.log('[Email Config] EMAIL_USER configured:', !!smtpUser);
-  console.log('[Email Config] EMAIL_PASSWORD configured:', !!smtpPass);
-  console.log('[Email Config] EMAIL_FROM configured:', !!smtpFrom);
+  console.log('[Email Config] RESEND_API_KEY configured:', !!config.apiKey);
+  console.log('[Email Config] EMAIL_FROM configured:', !!config.from);
 
-  if (!smtpHost || !smtpUser || !smtpPass) {
-    console.log('[Email Service] SMTP Verification: SKIPPED (EMAIL_USER or EMAIL_PASSWORD missing in backend/.env)');
+  if (config.missing.length > 0) {
+    console.log(`[Email Service] Resend verification: SKIPPED (${config.missing.join(', ')} missing)`);
     return false;
   }
 
-  try {
-    const portNum = Number(smtpPort);
-    const isSecure = process.env.EMAIL_SECURE === 'true' || portNum === 465;
-    const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: portNum,
-      secure: isSecure,
-      auth: { user: smtpUser, pass: smtpPass },
-      tls: { rejectUnauthorized: process.env.NODE_ENV === 'production' },
-    });
-
-    await transporter.verify();
-    console.log('[Email Service] SMTP connection verified: SUCCESS');
-    return true;
-  } catch (err) {
-    console.error('[Email Service] SMTP connection verified: FAILED -', err.message);
-    return false;
-  }
+  console.log('[Email Service] Resend configuration verified: SUCCESS');
+  return true;
 }

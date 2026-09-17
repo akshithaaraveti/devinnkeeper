@@ -1,4 +1,5 @@
 import { createCheckInAccessToken } from './checkinAccess.js';
+import { sendEmailWithResend, verifyEmailConfigOnStartup } from './email.js';
 
 function maskEmail(email) {
   const [local, domain] = String(email || '').split('@');
@@ -6,63 +7,21 @@ function maskEmail(email) {
   return `${local.slice(0, 2)}***@${domain}`;
 }
 
-function classifySmtpError(error) {
+function classifyEmailError(error) {
   const code = String(error?.code || '').toUpperCase();
-  const responseCode = Number(error?.responseCode || 0);
-  if (code.includes('AUTH') || responseCode === 535 || responseCode === 534) return 'authentication';
+  if (code.includes('AUTH') || code.includes('API_KEY') || code.includes('FORBIDDEN')) return 'authentication';
   if (code.includes('ECONN') || code.includes('ETIMEDOUT') || code.includes('ENOTFOUND')) return 'connection';
-  if (responseCode >= 400 && responseCode < 500) return 'smtp-client';
-  if (responseCode >= 500) return 'smtp-server';
   return 'unknown';
 }
 
-function getSmtpConfig() {
-  const missing = ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS'].filter((name) => !String(process.env[name] || '').trim());
-  if (missing.length) {
-    return { error: 'SMTP credentials are not configured.', missing };
-  }
-
-  return {
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT) || 587,
-    secure: process.env.SMTP_SECURE === 'true',
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
-  };
-}
-
-async function createVerifiedTransporter() {
-  const config = getSmtpConfig();
-  if (config.error) return config;
-
-  const nodemailer = await import('nodemailer');
-  const transporter = nodemailer.createTransport({
-    host: config.host,
-    port: config.port,
-    secure: config.secure,
-    auth: { user: config.user, pass: config.pass },
-  });
-
-  try {
-    await transporter.verify();
-    return { transporter, from: config.from };
-  } catch (error) {
-    return {
-      error: 'SMTP connection or authentication failed.',
-      category: classifySmtpError(error),
-    };
-  }
-}
-
 export async function verifyEmailTransport() {
-  const result = await createVerifiedTransporter();
-  if (result.error) {
-    console.error(`[CHECK-IN EMAIL] SMTP verification failed: category=${result.category || 'configuration'} error=${result.error}`);
-    return { success: false, error: result.error, category: result.category || 'configuration' };
+  if (!(await verifyEmailConfigOnStartup())) {
+    const error = 'Resend configuration is missing.';
+    console.error(`[CHECK-IN EMAIL] Resend verification failed: category=configuration error=${error}`);
+    return { success: false, error, category: 'configuration' };
   }
 
-  console.log('[CHECK-IN EMAIL] SMTP transporter verified successfully.');
+  console.log('[CHECK-IN EMAIL] Resend configuration verified successfully.');
   return { success: true };
 }
 
@@ -86,14 +45,7 @@ export async function sendCheckInEmail({ guestEmail, guestName, guestId, reserva
     });
     const checkInUrl = `${appBaseUrl.replace(/\/$/, '')}/checkin?resId=${reservationId}&token=${encodeURIComponent(checkInToken)}`;
 
-    const smtp = await createVerifiedTransporter();
-    if (smtp.error) {
-      console.error(`[CHECK-IN EMAIL] failed recipient=${maskEmail(normalizedEmail)} category=${smtp.category || 'configuration'} error=${smtp.error}`);
-      return { success: false, emailSent: false, checkInUrl, error: smtp.error, category: smtp.category || 'configuration' };
-    }
-
-    const mailInfo = await smtp.transporter.sendMail({
-          from: `"InnKeeper Motel Front Desk" <${smtp.from}>`,
+    const mailInfo = await sendEmailWithResend({
           to: normalizedEmail,
           subject: `Complete Your Express Room Check-In (Reservation #${reservationId})`,
           html: `
@@ -118,10 +70,10 @@ export async function sendCheckInEmail({ guestEmail, guestName, guestId, reserva
           `,
     });
 
-    console.log(`[CHECK-IN EMAIL] sent recipient=${maskEmail(normalizedEmail)} reservation=${reservationId} messageId=${mailInfo.messageId}`);
-    return { success: true, emailSent: true, email: normalizedEmail, checkInUrl, messageId: mailInfo.messageId };
+    console.log(`[CHECK-IN EMAIL] sent recipient=${maskEmail(normalizedEmail)} reservation=${reservationId} messageId=${mailInfo.id}`);
+    return { success: true, emailSent: true, email: normalizedEmail, checkInUrl, messageId: mailInfo.id };
   } catch (err) {
-    const category = classifySmtpError(err);
+    const category = classifyEmailError(err);
     console.error(`[CHECK-IN EMAIL] failed recipient=${recipient} reservation=${reservationId} category=${category} error=Unable to deliver the check-in email.`);
     return { success: false, emailSent: false, error: 'Unable to deliver the check-in email.', category };
   }
@@ -137,30 +89,7 @@ export async function sendPasswordResetEmail({ toEmail, resetToken }) {
 
     console.log(`[Auth] Attempting to send password reset email to ${toEmail}`);
 
-    const smtpHost = process.env.EMAIL_HOST || process.env.SMTP_HOST || 'smtp.gmail.com';
-    const smtpPort = Number(process.env.EMAIL_PORT || process.env.SMTP_PORT || 587);
-    const smtpUser = process.env.EMAIL_USER || process.env.SMTP_USER;
-    const smtpPass = process.env.EMAIL_PASSWORD || process.env.SMTP_PASS;
-    const smtpFrom = process.env.EMAIL_FROM || process.env.SMTP_FROM || smtpUser;
-
-    if (!smtpHost || !smtpUser || !smtpPass) {
-      console.error(`[Email Service] SMTP Error: SMTP credentials missing in .env`);
-      return { success: false, error: 'SMTP credentials missing' };
-    }
-
-    const nodemailer = await import('nodemailer');
-    const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: process.env.EMAIL_SECURE === 'true' || process.env.SMTP_SECURE === 'true' || smtpPort === 465,
-      auth: {
-        user: smtpUser,
-        pass: smtpPass,
-      },
-    });
-
-    const mailInfo = await transporter.sendMail({
-      from: `"InnKeeper Portal Support" <${smtpFrom}>`,
+    const mailInfo = await sendEmailWithResend({
       to: toEmail,
       subject: 'Reset Your InnKeeper Account Password',
       html: `
@@ -202,10 +131,10 @@ export async function sendPasswordResetEmail({ toEmail, resetToken }) {
       `,
     });
 
-    console.log(`[Auth] Password reset email sent successfully (Message ID: ${mailInfo.messageId})`);
-    return { success: true, resetUrl, messageId: mailInfo.messageId };
+    console.log(`[Auth] Password reset email sent successfully (Message ID: ${mailInfo.id})`);
+    return { success: true, resetUrl, messageId: mailInfo.id };
   } catch (err) {
-    console.error('[Auth] Error sending email via SMTP:', err.message);
+    console.error('[Auth] Error sending email via Resend:', err.message);
     return { success: false, error: err.message };
   }
 }

@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 import { config } from "../config/env";
 import { prisma } from "../prisma/client";
 
@@ -71,27 +71,18 @@ async function sendPasswordResetEmail({ to, token, name }: { to: string; token: 
   const resetUrl = `${String(appBaseUrl).replace(/\/$/, "")}/reset-password?token=${encodeURIComponent(token)}`;
   const firstName = name?.trim().split(/\s+/)[0] ?? "User";
 
-  const smtpHost = process.env.EMAIL_HOST ?? process.env.SMTP_HOST;
-  const smtpPort = Number(process.env.EMAIL_PORT ?? process.env.SMTP_PORT ?? 587);
-  const smtpUser = process.env.EMAIL_USER ?? process.env.SMTP_USER;
-  const smtpPass = process.env.EMAIL_PASSWORD ?? process.env.SMTP_PASS;
-  const smtpFrom = process.env.EMAIL_FROM ?? process.env.SMTP_FROM ?? `"InnKeeper Support" <${smtpUser ?? "no-reply@innkeeper.local"}>`;
+  const resendApiKey = process.env.RESEND_API_KEY?.trim();
+  const emailFrom = process.env.EMAIL_FROM?.trim();
 
-  if (!smtpHost || !smtpUser || !smtpPass) {
-    console.warn("[Auth Service] SMTP credentials missing; skip sending reset email.");
-    return { success: false, resetUrl, error: "SMTP credentials missing." };
+  if (!resendApiKey || !emailFrom) {
+    console.warn("[Auth Service] Resend configuration missing; skip sending reset email.");
+    return { success: false, resetUrl, error: "Resend configuration missing." };
   }
 
   try {
-    const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: process.env.EMAIL_SECURE === "true" || process.env.SMTP_SECURE === "true" || smtpPort === 465,
-      auth: { user: smtpUser, pass: smtpPass },
-    });
-
-    const info = await transporter.sendMail({
-      from: smtpFrom,
+    const resend = new Resend(resendApiKey);
+    const { data, error } = await resend.emails.send({
+      from: emailFrom,
       to,
       subject: "Reset your InnKeeper password",
       text: [
@@ -111,7 +102,9 @@ async function sendPasswordResetEmail({ to, token, name }: { to: string; token: 
       ].join("\n"),
     });
 
-    return { success: true, messageId: info.messageId, resetUrl };
+    if (error) throw new Error(error.message || "Resend email delivery failed.");
+
+    return { success: true, messageId: data?.id, resetUrl };
   } catch (error: any) {
     console.error("[Auth Service] Failed to send password reset email:", error?.message || error);
     return { success: false, resetUrl, error: error?.message || "Failed to send reset email." };
