@@ -73,9 +73,10 @@ export async function sendCheckInEmail({ guestEmail, guestName, guestId, reserva
     console.log(`[CHECK-IN EMAIL] sent recipient=${maskEmail(normalizedEmail)} reservation=${reservationId} messageId=${mailInfo.id}`);
     return { success: true, emailSent: true, email: normalizedEmail, checkInUrl, messageId: mailInfo.id };
   } catch (err) {
-    const category = classifyEmailError(err);
-    console.error(`[CHECK-IN EMAIL] failed recipient=${recipient} reservation=${reservationId} category=${category} error=Unable to deliver the check-in email.`);
-    return { success: false, emailSent: false, error: 'Unable to deliver the check-in email.', category };
+    const category = err?.category || classifyEmailError(err);
+    const errorMessage = err?.message || 'Unable to deliver the check-in email.';
+    console.error(`[CHECK-IN EMAIL] failed recipient=${recipient} reservation=${reservationId} category=${category} error=${errorMessage}`);
+    return { success: false, emailSent: false, error: errorMessage, category };
   }
 }
 
@@ -87,7 +88,7 @@ export async function sendPasswordResetEmail({ toEmail, resetToken }) {
     const appBaseUrl = process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.FRONTEND_URL || 'http://localhost:5173';
     const resetUrl = `${appBaseUrl.replace(/\/$/, '')}/reset-password?token=${encodeURIComponent(resetToken)}`;
 
-    console.log(`[Auth] Attempting to send password reset email to ${toEmail}`);
+    console.log(`[Auth] Attempting to send password reset email to ${maskEmail(toEmail)}`);
 
     const mailInfo = await sendEmailWithResend({
       to: toEmail,

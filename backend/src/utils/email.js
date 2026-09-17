@@ -1,5 +1,53 @@
 import { Resend } from 'resend';
 
+export class ResendEmailError extends Error {
+  constructor(message, { category = 'resend-api', statusCode, code, name } = {}) {
+    super(message);
+    this.name = name || 'ResendEmailError';
+    this.category = category;
+    this.statusCode = statusCode;
+    this.code = code;
+  }
+}
+
+function redactEmailAddresses(message) {
+  return String(message || 'Resend email delivery failed.')
+    .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, '<redacted-email>')
+    .replace(/\b(re|sk)_[A-Za-z0-9_-]+\b/g, '<redacted-api-key>');
+}
+
+function classifyResendError(error) {
+  const statusCode = Number(error?.statusCode || error?.status || 0);
+  const code = String(error?.code || error?.name || '').toLowerCase();
+  const message = String(error?.message || '').toLowerCase();
+
+  if (statusCode === 401 || statusCode === 403 || /api.?key|unauthori[sz]ed|forbidden|authentication/.test(`${code} ${message}`)) {
+    return 'authentication';
+  }
+  if (/from|sender|domain|identity|verified/.test(message) && /verify|valid|domain|identity|from|sender/.test(message)) {
+    return 'unverified-sender';
+  }
+  if (statusCode === 422 || /recipient|\bto\b|invalid email|email address/.test(message)) {
+    return 'invalid-recipient';
+  }
+  if (statusCode === 429 || /rate.?limit|too many requests/.test(message)) {
+    return 'rate-limit';
+  }
+  if (/econn|etimedout|enotfound|network|fetch failed|timeout/.test(`${code} ${message}`)) {
+    return 'connection';
+  }
+  return 'resend-api';
+}
+
+function toResendEmailError(error, fallbackMessage = 'Resend email delivery failed.') {
+  return new ResendEmailError(redactEmailAddresses(error?.message || fallbackMessage), {
+    category: error?.category || classifyResendError(error),
+    statusCode: error?.statusCode || error?.status,
+    code: error?.code,
+    name: error?.name,
+  });
+}
+
 function getResendConfig() {
   const apiKey = String(process.env.RESEND_API_KEY || '').trim();
   const from = String(process.env.EMAIL_FROM || '').trim();
@@ -9,26 +57,40 @@ function getResendConfig() {
   return { apiKey, from, missing };
 }
 
+function maskEmail(email) {
+  const [local, domain] = String(email || '').split('@');
+  if (!local || !domain) return '<invalid-email>';
+  return `${local.slice(0, 2)}***@${domain}`;
+}
+
 export async function sendEmailWithResend({ to, from, subject, text, html }) {
   const config = getResendConfig();
   if (config.missing.length > 0) {
-    throw new Error(`Resend configuration missing: ${config.missing.join(', ')}`);
+    throw new ResendEmailError(`Resend configuration missing: ${config.missing.join(', ')}`, { category: 'configuration' });
   }
 
   const resend = new Resend(config.apiKey);
-  const { data, error } = await resend.emails.send({
-    from: from || config.from,
-    to,
-    subject,
-    text,
-    html,
-  });
+  try {
+    const { data, error } = await resend.emails.send({
+      from: from || config.from,
+      to,
+      subject,
+      text,
+      html,
+    });
 
-  if (error) {
-    throw new Error(error.message || 'Resend email delivery failed.');
+    if (error) {
+      throw toResendEmailError(error);
+    }
+    if (!data?.id) {
+      throw new ResendEmailError('Resend returned no message ID.', { category: 'resend-api' });
+    }
+
+    return data;
+  } catch (error) {
+    if (error instanceof ResendEmailError) throw error;
+    throw toResendEmailError(error);
   }
-
-  return data;
 }
 
 /**
@@ -61,7 +123,7 @@ export async function sendPasswordResetEmail({ to, token, name }) {
 
   console.log('[Email Config] RESEND_API_KEY configured:', true);
   console.log('[Email Config] EMAIL_FROM configured:', true);
-  console.log(`[Email Service] Attempting to send password reset email to ${to} via Resend...`);
+  console.log(`[Email Service] Attempting to send password reset email to ${maskEmail(to)} via Resend...`);
 
   try {
     const info = await sendEmailWithResend({
