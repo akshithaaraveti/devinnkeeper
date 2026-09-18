@@ -17,6 +17,7 @@ _model_lock = threading.Lock()
 _model_ready = threading.Event()
 _model_status = "starting"
 _model_error = None
+_model_started_at = time.monotonic()
 
 
 class ModelNotReadyError(RuntimeError):
@@ -116,6 +117,8 @@ def health():
         "service": "InnKeeper Face Verification",
         "modelReady": _model_ready.is_set(),
         "modelStatus": _model_status,
+        "modelWarmupSeconds": round(time.monotonic() - _model_started_at, 1),
+        **({"modelError": _model_error[:300]} if _model_error else {}),
     })
 
 
