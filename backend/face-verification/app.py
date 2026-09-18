@@ -5,12 +5,22 @@ import os
 import tempfile
 
 app = Flask(__name__)
+MODEL_NAME = "Facenet"
+DETECTOR_BACKEND = "opencv"
+
+
+def initialize_face_model():
+    try:
+        DeepFace.build_model(MODEL_NAME)
+        app.logger.info("DeepFace model initialized: model=%s detector=%s", MODEL_NAME, DETECTOR_BACKEND)
+    except Exception:
+        app.logger.exception("DeepFace model initialization failed")
 
 
 def require_single_face(image_path, label):
     faces = DeepFace.extract_faces(
         img_path=image_path,
-        detector_backend="retinaface",
+        detector_backend=DETECTOR_BACKEND,
         enforce_detection=True,
         align=True,
     )
@@ -60,8 +70,6 @@ def verify():
                 "reason": "Selfie image file was not saved or is empty"
             }), 400
 
-        id_size = os.path.getsize(id_path)
-        selfie_size = os.path.getsize(selfie_path)
         id_image = cv2.imread(id_path)
         selfie_image = cv2.imread(selfie_path)
         if id_image is None:
@@ -82,21 +90,22 @@ def verify():
         result = DeepFace.verify(
             img1_path=id_path,
             img2_path=selfie_path,
-            model_name="ArcFace",
-            detector_backend="retinaface",
+            model_name=MODEL_NAME,
+            detector_backend=DETECTOR_BACKEND,
             enforce_detection=True
         )
         return jsonify({
             "verified": bool(result["verified"]),
             "distance": float(result["distance"]),
             "threshold": float(result["threshold"]),
-            "model": result["model"],
+            "model": result.get("model", MODEL_NAME),
             "reason": "Face match successful" if result["verified"] else "Face does not match the ID image",
         })
 
     except Exception as error:
         error_text = str(error).lower()
-        if isinstance(error, ValueError) or "face could not be detected" in error_text or "no face" in error_text or "exactly one face" in error_text or "processing img" in error_text or ("retinaface" in error_text and "face" in error_text):
+        app.logger.exception("DeepFace verification failed")
+        if isinstance(error, ValueError) or "face could not be detected" in error_text or "no face" in error_text or "exactly one face" in error_text or "processing img" in error_text or ("opencv" in error_text and "face" in error_text):
             reason = "Could not detect exactly one face in the ID image or selfie."
         elif "image" in error_text and ("read" in error_text or "decode" in error_text or "format" in error_text):
             reason = "Please upload a clearer image."
@@ -114,6 +123,26 @@ def verify():
 
         if selfie_path and os.path.exists(selfie_path):
             os.remove(selfie_path)
+
+
+@app.errorhandler(413)
+def request_too_large(error):
+    return jsonify({
+        "verified": False,
+        "reason": "Uploaded image is too large.",
+    }), 413
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(error):
+    app.logger.exception("Unhandled DeepFace request error")
+    return jsonify({
+        "verified": False,
+        "reason": "Face verification failed. Please try again.",
+    }), 500
+
+
+initialize_face_model()
 
 
 if __name__ == "__main__":
