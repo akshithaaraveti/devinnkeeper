@@ -4,6 +4,7 @@ import cv2
 import os
 import tempfile
 import threading
+import time
 
 app = Flask(__name__)
 MODEL_NAME = "Facenet"
@@ -39,17 +40,6 @@ def initialize_face_model():
             raise
 
 
-def require_single_face(image_path, label):
-    faces = get_deepface().extract_faces(
-        img_path=image_path,
-        detector_backend=DETECTOR_BACKEND,
-        enforce_detection=True,
-        align=True,
-    )
-    if len(faces) != 1:
-        raise ValueError(f"Exactly one face must be visible in the {label} image")
-
-
 @app.route("/", methods=["GET", "HEAD"])
 def root():
     return jsonify({
@@ -79,8 +69,11 @@ def verify():
     id_path = None
     selfie_path = None
 
+    started_at = time.monotonic()
     try:
+        model_started_at = time.monotonic()
         initialize_face_model()
+        app.logger.info("DeepFace model ready durationMs=%d", int((time.monotonic() - model_started_at) * 1000))
         id_fd, id_path = tempfile.mkstemp(suffix=".jpg")
         os.close(id_fd)
         with open(id_path, "wb") as id_output:
@@ -115,9 +108,7 @@ def verify():
                 "reason": "Selfie image cannot be read by OpenCV"
             }), 400
 
-        require_single_face(id_path, "ID")
-        require_single_face(selfie_path, "selfie")
-
+        verify_started_at = time.monotonic()
         result = get_deepface().verify(
             img1_path=id_path,
             img2_path=selfie_path,
@@ -125,6 +116,7 @@ def verify():
             detector_backend=DETECTOR_BACKEND,
             enforce_detection=True
         )
+        app.logger.info("DeepFace.verify completed durationMs=%d totalDurationMs=%d", int((time.monotonic() - verify_started_at) * 1000), int((time.monotonic() - started_at) * 1000))
         return jsonify({
             "verified": bool(result["verified"]),
             "distance": float(result["distance"]),

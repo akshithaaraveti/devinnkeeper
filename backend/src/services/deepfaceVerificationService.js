@@ -1,5 +1,5 @@
 const DEFAULT_DEEPFACE_SERVICE_URL = 'http://127.0.0.1:8001';
-const DEFAULT_DEEPFACE_TIMEOUT_MS = 120_000;
+const DEFAULT_DEEPFACE_TIMEOUT_MS = 180_000;
 
 function parseImageData(imageData, fieldName) {
   if (typeof imageData !== 'string' || imageData.length < 20) {
@@ -115,7 +115,7 @@ export async function verifyWithDeepFace({ idImageData, selfieImageData }) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
       console.error(`[DeepFace] timeout url=${getSafeServiceLabel(serviceUrl)}/verify timeoutMs=${getTimeoutMs()} durationMs=${Date.now() - startedAt}`);
-      return invalidResponse('DeepFace verification timed out.');
+      return invalidResponse(`DeepFace verification timed out after ${getTimeoutMs()}ms.`);
     }
 
     if (error instanceof Error && /image is required|image must be|image is empty/.test(error.message)) {
