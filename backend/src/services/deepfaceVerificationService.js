@@ -1,5 +1,7 @@
 const DEFAULT_DEEPFACE_SERVICE_URL = 'http://127.0.0.1:8001';
 const DEFAULT_DEEPFACE_TIMEOUT_MS = 240_000;
+const MODEL_WARMUP_RETRIES = 12;
+const MODEL_WARMUP_RETRY_DELAY_MS = 10_000;
 
 function parseImageData(imageData, fieldName) {
   if (typeof imageData !== 'string' || imageData.length < 20) {
@@ -55,6 +57,10 @@ function safeResponseBody(responseText) {
     .slice(0, 1000);
 }
 
+function waitForRetry(delayMs) {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
 export async function verifyWithDeepFace({ idImageData, selfieImageData }) {
   const serviceUrl = getServiceUrl();
   const verifyUrl = `${serviceUrl}/verify`;
@@ -78,11 +84,29 @@ export async function verifyWithDeepFace({ idImageData, selfieImageData }) {
 
     console.log(`[DeepFace] POST ${getSafeServiceLabel(serviceUrl)}/verify idBytes=${idImage.buffer.length} selfieBytes=${selfieImage.buffer.length}`);
 
-    const response = await fetch(verifyUrl, {
-      method: 'POST',
-      body: formData,
-      signal: AbortSignal.timeout(getTimeoutMs()),
-    });
+    let response;
+    for (let attempt = 1; attempt <= MODEL_WARMUP_RETRIES; attempt += 1) {
+      response = await fetch(verifyUrl, {
+        method: 'POST',
+        body: formData,
+        signal: AbortSignal.timeout(getTimeoutMs()),
+      });
+
+      if (response.status !== 503 || attempt === MODEL_WARMUP_RETRIES) break;
+
+      const retryBody = await response.text();
+      let retryPayload;
+      try {
+        retryPayload = JSON.parse(retryBody);
+      } catch {
+        retryPayload = null;
+      }
+      const retryReason = String(retryPayload?.reason || '').toLowerCase();
+      if (!retryReason.includes('warming up') && !retryReason.includes('model')) break;
+
+      console.warn(`[DeepFace] model not ready; retry=${attempt}/${MODEL_WARMUP_RETRIES} delayMs=${MODEL_WARMUP_RETRY_DELAY_MS}`);
+      await waitForRetry(MODEL_WARMUP_RETRY_DELAY_MS);
+    }
 
     const responseText = await response.text();
     let payload;
