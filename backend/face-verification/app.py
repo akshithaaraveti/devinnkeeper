@@ -1,24 +1,45 @@
 from flask import Flask, request, jsonify
-from deepface import DeepFace
 import cv2
 import os
 import tempfile
+import threading
 
 app = Flask(__name__)
 MODEL_NAME = "Facenet"
 DETECTOR_BACKEND = "opencv"
+_deepface = None
+_model_lock = threading.Lock()
+_model_initialized = False
+
+
+def get_deepface():
+    global _deepface
+    if _deepface is None:
+        from deepface import DeepFace
+        _deepface = DeepFace
+    return _deepface
 
 
 def initialize_face_model():
+    global _model_initialized
+    if _model_initialized:
+        return
+
+    with _model_lock:
+        if _model_initialized:
+            return
+
     try:
-        DeepFace.build_model(MODEL_NAME)
+        get_deepface().build_model(MODEL_NAME)
+        _model_initialized = True
         app.logger.info("DeepFace model initialized: model=%s detector=%s", MODEL_NAME, DETECTOR_BACKEND)
     except Exception:
         app.logger.exception("DeepFace model initialization failed")
+        raise
 
 
 def require_single_face(image_path, label):
-    faces = DeepFace.extract_faces(
+    faces = get_deepface().extract_faces(
         img_path=image_path,
         detector_backend=DETECTOR_BACKEND,
         enforce_detection=True,
@@ -50,6 +71,7 @@ def verify():
     selfie_path = None
 
     try:
+        initialize_face_model()
         id_fd, id_path = tempfile.mkstemp(suffix=".jpg")
         os.close(id_fd)
         with open(id_path, "wb") as id_output:
@@ -87,7 +109,7 @@ def verify():
         require_single_face(id_path, "ID")
         require_single_face(selfie_path, "selfie")
 
-        result = DeepFace.verify(
+        result = get_deepface().verify(
             img1_path=id_path,
             img2_path=selfie_path,
             model_name=MODEL_NAME,
@@ -140,9 +162,6 @@ def handle_unexpected_error(error):
         "verified": False,
         "reason": "Face verification failed. Please try again.",
     }), 500
-
-
-initialize_face_model()
 
 
 if __name__ == "__main__":
