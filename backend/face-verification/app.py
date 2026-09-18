@@ -1,3 +1,4 @@
+from werkzeug.exceptions import HTTPException
 from flask import Flask, request, jsonify
 import cv2
 import os
@@ -29,13 +30,13 @@ def initialize_face_model():
         if _model_initialized:
             return
 
-    try:
-        get_deepface().build_model(MODEL_NAME)
-        _model_initialized = True
-        app.logger.info("DeepFace model initialized: model=%s detector=%s", MODEL_NAME, DETECTOR_BACKEND)
-    except Exception:
-        app.logger.exception("DeepFace model initialization failed")
-        raise
+        try:
+            get_deepface().build_model(MODEL_NAME)
+            _model_initialized = True
+            app.logger.info("DeepFace model initialized: model=%s detector=%s", MODEL_NAME, DETECTOR_BACKEND)
+        except Exception:
+            app.logger.exception("DeepFace model initialization failed")
+            raise
 
 
 def require_single_face(image_path, label):
@@ -49,7 +50,15 @@ def require_single_face(image_path, label):
         raise ValueError(f"Exactly one face must be visible in the {label} image")
 
 
-@app.route("/health", methods=["GET"])
+@app.route("/", methods=["GET", "HEAD"])
+def root():
+    return jsonify({
+        "status": "ok",
+        "service": "deepface",
+    })
+
+
+@app.route("/health", methods=["GET", "HEAD"])
 def health():
     return jsonify({
         "status": "ok",
@@ -153,6 +162,15 @@ def request_too_large(error):
         "verified": False,
         "reason": "Uploaded image is too large.",
     }), 413
+
+
+@app.errorhandler(HTTPException)
+def handle_http_error(error):
+    return jsonify({
+        "verified": False,
+        "error": error.name,
+        "reason": error.description,
+    }), error.code
 
 
 @app.errorhandler(Exception)
