@@ -28,7 +28,17 @@ function getTimeoutMs() {
 }
 
 function getServiceUrl() {
-  return (process.env.DEEPFACE_SERVICE_URL || DEFAULT_DEEPFACE_SERVICE_URL).replace(/\/+$/, '');
+  const configuredUrl = String(process.env.DEEPFACE_SERVICE_URL || DEFAULT_DEEPFACE_SERVICE_URL).trim();
+  return configuredUrl.replace(/\/+$/, '').replace(/\/verify$/i, '');
+}
+
+function getSafeServiceLabel(serviceUrl) {
+  try {
+    const url = new URL(serviceUrl);
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return '<invalid-deepface-url>';
+  }
 }
 
 function invalidResponse(reason) {
@@ -38,7 +48,18 @@ function invalidResponse(reason) {
   };
 }
 
+function safeResponseBody(responseText) {
+  return String(responseText || '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/(authorization|cookie|token|api[-_ ]?key)\s*[:=]\s*[^,; ]+/gi, '$1=<redacted>')
+    .slice(0, 1000);
+}
+
 export async function verifyWithDeepFace({ idImageData, selfieImageData }) {
+  const serviceUrl = getServiceUrl();
+  const verifyUrl = `${serviceUrl}/verify`;
+  const startedAt = Date.now();
+
   try {
     const idImage = parseImageData(idImageData, 'ID');
     const selfieImage = parseImageData(selfieImageData, 'Selfie');
@@ -55,18 +76,25 @@ export async function verifyWithDeepFace({ idImageData, selfieImageData }) {
       'selfie-image.jpg',
     );
 
-    const response = await fetch(`${getServiceUrl()}/verify`, {
+    console.log(`[DeepFace] POST ${getSafeServiceLabel(serviceUrl)}/verify idBytes=${idImage.buffer.length} selfieBytes=${selfieImage.buffer.length}`);
+
+    const response = await fetch(verifyUrl, {
       method: 'POST',
       body: formData,
       signal: AbortSignal.timeout(getTimeoutMs()),
     });
 
+    const responseText = await response.text();
     let payload;
     try {
-      payload = await response.json();
+      payload = JSON.parse(responseText);
     } catch {
-      return invalidResponse('DeepFace service returned an invalid response.');
+      const contentType = response.headers.get('content-type') || '<missing>';
+      console.error(`[DeepFace] invalid non-JSON response status=${response.status} contentType=${contentType} durationMs=${Date.now() - startedAt} body=${safeResponseBody(responseText) || '<empty>'}`);
+      return invalidResponse(`DeepFace service returned a non-JSON response (HTTP ${response.status}). Check the DeepFace Render worker logs.`);
     }
+
+    console.log(`[DeepFace] response status=${response.status} durationMs=${Date.now() - startedAt} body=${JSON.stringify(payload).slice(0, 1000)}`);
 
     if (!response.ok) {
       return invalidResponse(payload?.reason || 'DeepFace verification failed.');
@@ -84,14 +112,18 @@ export async function verifyWithDeepFace({ idImageData, selfieImageData }) {
       ...(typeof payload.reason === 'string' ? { reason: payload.reason } : {}),
     };
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+      console.error(`[DeepFace] timeout url=${getSafeServiceLabel(serviceUrl)}/verify timeoutMs=${getTimeoutMs()} durationMs=${Date.now() - startedAt}`);
       return invalidResponse('DeepFace verification timed out.');
     }
 
     if (error instanceof Error && /image is required|image must be|image is empty/.test(error.message)) {
+      console.error(`[DeepFace] invalid image: ${error.message}`);
       return invalidResponse(error.message);
     }
 
+    console.error(`[DeepFace] request failed url=${getSafeServiceLabel(serviceUrl)}/verify durationMs=${Date.now() - startedAt} error=${errorMessage}`);
     return invalidResponse('DeepFace verification service is unavailable.');
   }
 }
