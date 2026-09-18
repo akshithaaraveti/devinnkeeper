@@ -23,7 +23,7 @@ function parseImageData(imageData, fieldName) {
 function getTimeoutMs() {
   const configuredTimeout = Number(process.env.DEEPFACE_TIMEOUT_MS);
   return Number.isFinite(configuredTimeout) && configuredTimeout > 0
-    ? configuredTimeout
+    ? Math.max(configuredTimeout, DEFAULT_DEEPFACE_TIMEOUT_MS)
     : DEFAULT_DEEPFACE_TIMEOUT_MS;
 }
 

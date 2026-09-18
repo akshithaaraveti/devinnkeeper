@@ -1,6 +1,7 @@
 from werkzeug.exceptions import HTTPException
 from flask import Flask, request, jsonify
 import cv2
+import numpy as np
 import os
 import tempfile
 import threading
@@ -9,6 +10,8 @@ import time
 app = Flask(__name__)
 MODEL_NAME = "SFace"
 DETECTOR_BACKEND = "opencv"
+MAX_IMAGE_DIMENSION = 1024
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
 _deepface = None
 _model_lock = threading.Lock()
 _model_initialized = False
@@ -47,6 +50,38 @@ def warm_face_model():
         app.logger.exception("Background DeepFace model warmup failed; verification will retry on demand")
 
 
+def save_normalized_image(uploaded_file, image_path, label):
+    raw_bytes = uploaded_file.read()
+    if not raw_bytes:
+        raise ValueError(f"{label} image is empty")
+    if len(raw_bytes) > MAX_IMAGE_BYTES:
+        raise ValueError(f"{label} image is too large")
+
+    decode_started_at = time.monotonic()
+    image = cv2.imdecode(np.frombuffer(raw_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError(f"{label} image cannot be decoded")
+
+    height, width = image.shape[:2]
+    scale = min(1.0, MAX_IMAGE_DIMENSION / max(height, width))
+    if scale < 1.0:
+        image = cv2.resize(image, (max(1, int(width * scale)), max(1, int(height * scale))), interpolation=cv2.INTER_AREA)
+
+    if not cv2.imwrite(image_path, image, [cv2.IMWRITE_JPEG_QUALITY, 90]):
+        raise ValueError(f"{label} image could not be saved")
+
+    app.logger.info(
+        "DeepFace image prepared label=%s inputBytes=%d inputSize=%sx%s outputSize=%sx%s durationMs=%d",
+        label,
+        len(raw_bytes),
+        width,
+        height,
+        image.shape[1],
+        image.shape[0],
+        int((time.monotonic() - decode_started_at) * 1000),
+    )
+
+
 @app.route("/", methods=["GET", "HEAD"])
 def root():
     return jsonify({
@@ -83,12 +118,10 @@ def verify():
         app.logger.info("DeepFace model ready durationMs=%d", int((time.monotonic() - model_started_at) * 1000))
         id_fd, id_path = tempfile.mkstemp(suffix=".jpg")
         os.close(id_fd)
-        with open(id_path, "wb") as id_output:
-            id_output.write(id_file.read())
         selfie_fd, selfie_path = tempfile.mkstemp(suffix=".jpg")
         os.close(selfie_fd)
-        with open(selfie_path, "wb") as selfie_output:
-            selfie_output.write(selfie_file.read())
+        save_normalized_image(id_file, id_path, "ID")
+        save_normalized_image(selfie_file, selfie_path, "Selfie")
         if not os.path.exists(id_path) or os.path.getsize(id_path) == 0:
             return jsonify({
                 "verified": False,
@@ -116,6 +149,7 @@ def verify():
             }), 400
 
         verify_started_at = time.monotonic()
+        app.logger.info("DeepFace.verify starting model=%s detector=%s", MODEL_NAME, DETECTOR_BACKEND)
         result = get_deepface().verify(
             img1_path=id_path,
             img2_path=selfie_path,
@@ -123,7 +157,7 @@ def verify():
             detector_backend=DETECTOR_BACKEND,
             enforce_detection=True
         )
-        app.logger.info("DeepFace.verify completed durationMs=%d totalDurationMs=%d", int((time.monotonic() - verify_started_at) * 1000), int((time.monotonic() - started_at) * 1000))
+        app.logger.info("DeepFace.verify completed verified=%s durationMs=%d totalDurationMs=%d", result.get("verified"), int((time.monotonic() - verify_started_at) * 1000), int((time.monotonic() - started_at) * 1000))
         return jsonify({
             "verified": bool(result["verified"]),
             "distance": float(result["distance"]),
@@ -135,6 +169,9 @@ def verify():
     except Exception as error:
         error_text = str(error).lower()
         app.logger.exception("DeepFace verification failed")
+        if "image" in error_text and ("empty" in error_text or "decode" in error_text or "read" in error_text or "saved" in error_text or "large" in error_text):
+            reason = str(error)
+            return jsonify({"verified": False, "reason": reason}), 400
         if isinstance(error, ValueError) or "face could not be detected" in error_text or "no face" in error_text or "exactly one face" in error_text or "processing img" in error_text or ("opencv" in error_text and "face" in error_text):
             reason = "Could not detect exactly one face in the ID image or selfie."
         elif "image" in error_text and ("read" in error_text or "decode" in error_text or "format" in error_text):
