@@ -15,13 +15,9 @@ MAX_IMAGE_BYTES = 10 * 1024 * 1024
 _deepface = None
 _model_lock = threading.Lock()
 _model_ready = threading.Event()
-_model_status = "starting"
+_model_status = "not_initialized"
 _model_error = None
 _model_started_at = time.monotonic()
-
-
-class ModelNotReadyError(RuntimeError):
-    pass
 
 
 def get_deepface():
@@ -35,39 +31,37 @@ def get_deepface():
 def initialize_face_model():
     global _model_status, _model_error
     if _model_ready.is_set():
-        return
+        return True
 
     with _model_lock:
         if _model_ready.is_set():
-            return
+            return True
 
+        _model_status = "initializing"
+        _model_error = None
+        started_at = time.monotonic()
+        app.logger.info("DeepFace model initialization starting model=%s detector=%s", MODEL_NAME, DETECTOR_BACKEND)
         try:
             get_deepface().build_model(MODEL_NAME)
             _model_error = None
             _model_status = "ready"
             _model_ready.set()
-            app.logger.info("DeepFace model initialized: model=%s detector=%s", MODEL_NAME, DETECTOR_BACKEND)
+            app.logger.info(
+                "DeepFace model initialized model=%s detector=%s durationMs=%d",
+                MODEL_NAME,
+                DETECTOR_BACKEND,
+                int((time.monotonic() - started_at) * 1000),
+            )
+            return True
         except Exception as error:
             _model_status = "failed"
             _model_error = str(error)
-            app.logger.exception("DeepFace model initialization failed")
+            app.logger.exception(
+                "DeepFace model initialization failed model=%s durationMs=%d",
+                MODEL_NAME,
+                int((time.monotonic() - started_at) * 1000),
+            )
             raise
-
-
-def require_ready_model():
-    if _model_ready.is_set():
-        return
-    detail = "DeepFace model is still warming up. Please retry shortly."
-    if _model_status == "failed":
-        detail = "DeepFace model initialization failed. Check the face-verification service logs."
-    raise ModelNotReadyError(detail)
-
-
-def warm_face_model():
-    try:
-        initialize_face_model()
-    except Exception:
-        app.logger.exception("Background DeepFace model warmup failed; verification will retry on demand")
 
 
 def save_normalized_image(uploaded_file, image_path, label):
@@ -138,7 +132,7 @@ def verify():
     started_at = time.monotonic()
     try:
         model_started_at = time.monotonic()
-        require_ready_model()
+        initialize_face_model()
         app.logger.info("DeepFace model ready durationMs=%d", int((time.monotonic() - model_started_at) * 1000))
         id_fd, id_path = tempfile.mkstemp(suffix=".jpg")
         os.close(id_fd)
@@ -192,10 +186,6 @@ def verify():
 
     except Exception as error:
         error_text = str(error).lower()
-        if isinstance(error, ModelNotReadyError):
-            app.logger.warning("DeepFace verification rejected before model readiness: %s", error)
-            return jsonify({"verified": False, "reason": str(error)}), 503
-
         app.logger.exception("DeepFace verification failed")
         if "image" in error_text and ("empty" in error_text or "decode" in error_text or "read" in error_text or "saved" in error_text or "large" in error_text):
             reason = str(error)
@@ -244,9 +234,6 @@ def handle_unexpected_error(error):
         "verified": False,
         "reason": "Face verification failed. Please try again.",
     }), 500
-
-
-threading.Thread(target=warm_face_model, name="deepface-model-warmup", daemon=True).start()
 
 
 if __name__ == "__main__":
