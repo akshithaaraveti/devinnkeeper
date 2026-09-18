@@ -1,5 +1,5 @@
 const DEFAULT_DEEPFACE_SERVICE_URL = 'http://127.0.0.1:8001';
-const DEFAULT_DEEPFACE_TIMEOUT_MS = 180_000;
+const DEFAULT_DEEPFACE_TIMEOUT_MS = 240_000;
 
 function parseImageData(imageData, fieldName) {
   if (typeof imageData !== 'string' || imageData.length < 20) {

@@ -7,7 +7,7 @@ import threading
 import time
 
 app = Flask(__name__)
-MODEL_NAME = "Facenet"
+MODEL_NAME = "SFace"
 DETECTOR_BACKEND = "opencv"
 _deepface = None
 _model_lock = threading.Lock()
@@ -38,6 +38,13 @@ def initialize_face_model():
         except Exception:
             app.logger.exception("DeepFace model initialization failed")
             raise
+
+
+def warm_face_model():
+    try:
+        initialize_face_model()
+    except Exception:
+        app.logger.exception("Background DeepFace model warmup failed; verification will retry on demand")
 
 
 @app.route("/", methods=["GET", "HEAD"])
@@ -172,6 +179,9 @@ def handle_unexpected_error(error):
         "verified": False,
         "reason": "Face verification failed. Please try again.",
     }), 500
+
+
+threading.Thread(target=warm_face_model, name="deepface-model-warmup", daemon=True).start()
 
 
 if __name__ == "__main__":
