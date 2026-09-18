@@ -18,6 +18,7 @@ _model_ready = threading.Event()
 _model_status = "not_initialized"
 _model_error = None
 _model_started_at = time.monotonic()
+DEFAULT_MODEL_INIT_TIMEOUT_MS = 180_000
 
 
 def get_deepface():
@@ -28,12 +29,29 @@ def get_deepface():
     return _deepface
 
 
-def initialize_face_model():
+def get_model_init_timeout_ms():
+    configured = os.getenv("DEEPFACE_MODEL_INIT_TIMEOUT_MS")
+    try:
+        timeout_ms = int(configured) if configured else DEFAULT_MODEL_INIT_TIMEOUT_MS
+    except ValueError:
+        timeout_ms = DEFAULT_MODEL_INIT_TIMEOUT_MS
+    return max(1_000, timeout_ms)
+
+
+def initialize_face_model(timeout_ms=None):
     global _model_status, _model_error
     if _model_ready.is_set():
         return True
 
-    with _model_lock:
+    timeout_ms = timeout_ms or get_model_init_timeout_ms()
+    lock_acquired = _model_lock.acquire(timeout=timeout_ms / 1000)
+    if not lock_acquired:
+        _model_status = "timeout"
+        _model_error = f"Model initialization lock timeout after {timeout_ms}ms"
+        app.logger.error("DeepFace model initialization lock timeout timeoutMs=%d", timeout_ms)
+        raise TimeoutError(_model_error)
+
+    try:
         if _model_ready.is_set():
             return True
 
@@ -62,6 +80,8 @@ def initialize_face_model():
                 int((time.monotonic() - started_at) * 1000),
             )
             raise
+    finally:
+        _model_lock.release()
 
 
 def save_normalized_image(uploaded_file, image_path, label):
@@ -106,13 +126,31 @@ def root():
 
 @app.route("/health", methods=["GET", "HEAD"])
 def health():
+    try:
+        initialize_face_model()
+    except TimeoutError as error:
+        return jsonify({
+            "status": "degraded",
+            "service": "InnKeeper Face Verification",
+            "modelReady": False,
+            "modelStatus": "timeout",
+            "modelError": str(error),
+        }), 503
+    except Exception as error:
+        return jsonify({
+            "status": "degraded",
+            "service": "InnKeeper Face Verification",
+            "modelReady": False,
+            "modelStatus": "failed",
+            "modelError": str(error)[:300],
+        }), 503
+
     return jsonify({
         "status": "ok",
         "service": "InnKeeper Face Verification",
-        "modelReady": _model_ready.is_set(),
-        "modelStatus": _model_status,
+        "modelReady": True,
+        "modelStatus": "ready",
         "modelWarmupSeconds": round(time.monotonic() - _model_started_at, 1),
-        **({"modelError": _model_error[:300]} if _model_error else {}),
     })
 
 
@@ -186,6 +224,13 @@ def verify():
 
     except Exception as error:
         error_text = str(error).lower()
+        if isinstance(error, TimeoutError):
+            app.logger.error("DeepFace verification rejected because model initialization timed out: %s", error)
+            return jsonify({
+                "verified": False,
+                "reason": str(error),
+            }), 503
+
         app.logger.exception("DeepFace verification failed")
         if "image" in error_text and ("empty" in error_text or "decode" in error_text or "read" in error_text or "saved" in error_text or "large" in error_text):
             reason = str(error)
