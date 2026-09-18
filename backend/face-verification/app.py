@@ -14,7 +14,13 @@ MAX_IMAGE_DIMENSION = 1024
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 _deepface = None
 _model_lock = threading.Lock()
-_model_initialized = False
+_model_ready = threading.Event()
+_model_status = "starting"
+_model_error = None
+
+
+class ModelNotReadyError(RuntimeError):
+    pass
 
 
 def get_deepface():
@@ -26,21 +32,34 @@ def get_deepface():
 
 
 def initialize_face_model():
-    global _model_initialized
-    if _model_initialized:
+    global _model_status, _model_error
+    if _model_ready.is_set():
         return
 
     with _model_lock:
-        if _model_initialized:
+        if _model_ready.is_set():
             return
 
         try:
             get_deepface().build_model(MODEL_NAME)
-            _model_initialized = True
+            _model_error = None
+            _model_status = "ready"
+            _model_ready.set()
             app.logger.info("DeepFace model initialized: model=%s detector=%s", MODEL_NAME, DETECTOR_BACKEND)
-        except Exception:
+        except Exception as error:
+            _model_status = "failed"
+            _model_error = str(error)
             app.logger.exception("DeepFace model initialization failed")
             raise
+
+
+def require_ready_model():
+    if _model_ready.is_set():
+        return
+    detail = "DeepFace model is still warming up. Please retry shortly."
+    if _model_status == "failed":
+        detail = "DeepFace model initialization failed. Check the face-verification service logs."
+    raise ModelNotReadyError(detail)
 
 
 def warm_face_model():
@@ -94,7 +113,9 @@ def root():
 def health():
     return jsonify({
         "status": "ok",
-        "service": "InnKeeper Face Verification"
+        "service": "InnKeeper Face Verification",
+        "modelReady": _model_ready.is_set(),
+        "modelStatus": _model_status,
     })
 
 
@@ -114,7 +135,7 @@ def verify():
     started_at = time.monotonic()
     try:
         model_started_at = time.monotonic()
-        initialize_face_model()
+        require_ready_model()
         app.logger.info("DeepFace model ready durationMs=%d", int((time.monotonic() - model_started_at) * 1000))
         id_fd, id_path = tempfile.mkstemp(suffix=".jpg")
         os.close(id_fd)
@@ -168,6 +189,10 @@ def verify():
 
     except Exception as error:
         error_text = str(error).lower()
+        if isinstance(error, ModelNotReadyError):
+            app.logger.warning("DeepFace verification rejected before model readiness: %s", error)
+            return jsonify({"verified": False, "reason": str(error)}), 503
+
         app.logger.exception("DeepFace verification failed")
         if "image" in error_text and ("empty" in error_text or "decode" in error_text or "read" in error_text or "saved" in error_text or "large" in error_text):
             reason = str(error)
