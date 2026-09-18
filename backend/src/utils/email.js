@@ -1,9 +1,20 @@
 import { Resend } from 'resend';
+import { google } from 'googleapis';
 
 export class ResendEmailError extends Error {
   constructor(message, { category = 'resend-api', statusCode, code, name } = {}) {
     super(message);
     this.name = name || 'ResendEmailError';
+    this.category = category;
+    this.statusCode = statusCode;
+    this.code = code;
+  }
+}
+
+export class GmailEmailError extends Error {
+  constructor(message, { category = 'gmail-api', statusCode, code } = {}) {
+    super(message);
+    this.name = 'GmailEmailError';
     this.category = category;
     this.statusCode = statusCode;
     this.code = code;
@@ -63,6 +74,93 @@ function maskEmail(email) {
   return `${local.slice(0, 2)}***@${domain}`;
 }
 
+function getGmailConfig() {
+  const config = {
+    clientId: String(process.env.GMAIL_CLIENT_ID || '').trim(),
+    clientSecret: String(process.env.GMAIL_CLIENT_SECRET || '').trim(),
+    redirectUri: String(process.env.GMAIL_REDIRECT_URI || '').trim(),
+    refreshToken: String(process.env.GMAIL_REFRESH_TOKEN || '').trim(),
+    userEmail: String(process.env.GMAIL_USER_EMAIL || '').trim(),
+  };
+  const missing = Object.entries(config)
+    .filter(([, value]) => !value)
+    .map(([name]) => `GMAIL_${name.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase().replace(/^GMAIL_/, '')}`);
+  return { ...config, missing };
+}
+
+function classifyGmailError(error) {
+  const statusCode = Number(error?.response?.status || error?.statusCode || error?.code || 0);
+  const message = String(error?.response?.data?.error?.message || error?.message || '').toLowerCase();
+  if (statusCode === 401 || statusCode === 403 || /unauthori[sz]ed|invalid grant|token|credential|permission/.test(message)) {
+    return 'authentication';
+  }
+  if (/recipient|invalid argument|invalid email|email address/.test(message)) return 'invalid-recipient';
+  if (statusCode === 429 || /rate.?limit|quota/.test(message)) return 'rate-limit';
+  if (/econn|etimedout|enotfound|network|fetch failed|timeout/.test(message)) return 'connection';
+  return 'gmail-api';
+}
+
+function getSafeErrorMessage(error, fallbackMessage) {
+  return String(error?.response?.data?.error?.message || error?.message || fallbackMessage)
+    .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, '<redacted-email>')
+    .replace(/\b(re|sk)_[A-Za-z0-9_-]+\b/g, '<redacted-api-key>');
+}
+
+function createRawGmailMessage({ to, from, subject, text, html }) {
+  const headers = [
+    `From: ${from}`,
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    'MIME-Version: 1.0',
+    'Content-Type: multipart/alternative; boundary="innkeeper-boundary"',
+  ];
+  const body = [
+    '--innkeeper-boundary',
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: 8bit',
+    '',
+    text || '',
+    '--innkeeper-boundary',
+    'Content-Type: text/html; charset="UTF-8"',
+    'Content-Transfer-Encoding: 8bit',
+    '',
+    html || '',
+    '--innkeeper-boundary--',
+  ].join('\r\n');
+  return Buffer.from(`${headers.join('\r\n')}\r\n\r\n${body}`).toString('base64url');
+}
+
+export async function sendEmailWithGmail({ to, subject, text, html }) {
+  const config = getGmailConfig();
+  if (config.missing.length > 0) {
+    throw new GmailEmailError(`Gmail configuration missing: ${config.missing.join(', ')}`, { category: 'configuration' });
+  }
+
+  try {
+    const oauth2Client = new google.auth.OAuth2(config.clientId, config.clientSecret, config.redirectUri);
+    oauth2Client.setCredentials({ refresh_token: config.refreshToken });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    const response = await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: {
+        raw: createRawGmailMessage({ to, from: config.userEmail, subject, text, html }),
+      },
+    });
+
+    if (!response.data?.id) {
+      throw new GmailEmailError('Gmail API returned no message ID.', { category: 'gmail-api' });
+    }
+    return { id: response.data.id };
+  } catch (error) {
+    if (error instanceof GmailEmailError) throw error;
+    throw new GmailEmailError(getSafeErrorMessage(error, 'Gmail API email delivery failed.'), {
+      category: classifyGmailError(error),
+      statusCode: error?.response?.status,
+      code: error?.code,
+    });
+  }
+}
+
 export async function sendEmailWithResend({ to, from, subject, text, html }) {
   const config = getResendConfig();
   if (config.missing.length > 0) {
@@ -93,6 +191,26 @@ export async function sendEmailWithResend({ to, from, subject, text, html }) {
   }
 }
 
+export async function sendEmailWithGmailOrResend({ to, subject, text, html }) {
+  try {
+    const result = await sendEmailWithGmail({ to, subject, text, html });
+    return { ...result, deliveredViaGmail: true, deliveredViaResend: false };
+  } catch (gmailError) {
+    console.warn(`[Email Service] Gmail delivery failed; trying Resend fallback category=${gmailError.category || 'gmail-api'} error=${gmailError.message}`);
+
+    try {
+      const result = await sendEmailWithResend({ to, subject, text, html });
+      return { ...result, deliveredViaGmail: false, deliveredViaResend: true };
+    } catch (resendError) {
+      const error = new ResendEmailError(
+        `Gmail failed (${gmailError.message}); Resend fallback failed (${resendError.message}).`,
+        { category: resendError.category || gmailError.category || 'resend-api' },
+      );
+      throw error;
+    }
+  }
+}
+
 /**
  * Sends a password reset email to a user with a secure reset link.
  * Reads configuration from environment variables without hardcoded credentials.
@@ -112,22 +230,10 @@ export async function sendPasswordResetEmail({ to, token, name }) {
   const resetUrl = `${appBaseUrl.replace(/\/$/, '')}/reset-password?token=${encodeURIComponent(token)}`;
   const firstName = name ? name.trim().split(' ')[0] : 'User';
 
-  const config = getResendConfig();
-  if (config.missing.length > 0) {
-    config.missing.forEach((varName) => {
-      console.error(`[Email Service] Missing ${varName}`);
-    });
-    const errorMsg = `Resend configuration (${config.missing.join(', ')}) is missing in .env`;
-    return { success: false, error: errorMsg, resetUrl, deliveredViaSmtp: false, deliveredViaResend: false };
-  }
-
-  console.log('[Email Config] RESEND_API_KEY configured:', true);
-  console.log('[Email Config] EMAIL_FROM configured:', true);
-  console.log(`[Email Service] Attempting to send password reset email to ${maskEmail(to)} via Resend...`);
+  console.log(`[Email Service] Attempting to send password reset email to ${maskEmail(to)} via Gmail API...`);
 
   try {
-    const info = await sendEmailWithResend({
-      from: config.from,
+    const info = await sendEmailWithGmailOrResend({
       to,
       subject: 'Reset your InnKeeper password',
       text: [
@@ -239,10 +345,10 @@ export async function sendPasswordResetEmail({ to, token, name }) {
       `,
     });
 
-    console.log(`[Email Service] Password reset email sent successfully (Message ID: ${info.id})`);
-    return { success: true, messageId: info.id, resetUrl, deliveredViaSmtp: false, deliveredViaResend: true };
+    console.log(`[Email Service] Password reset email sent successfully via ${info.deliveredViaGmail ? 'Gmail API' : 'Resend fallback'} (Message ID: ${info.id})`);
+    return { success: true, messageId: info.id, resetUrl, deliveredViaSmtp: false, deliveredViaResend: info.deliveredViaResend };
   } catch (error) {
-    console.error(`[Email Service] Resend Error: ${error.message}`);
+    console.error(`[Email Service] Email delivery error category=${error.category || 'unknown'}: ${error.message}`);
     return { success: false, error: error.message, resetUrl, deliveredViaSmtp: false, deliveredViaResend: false };
   }
 }
@@ -251,17 +357,25 @@ export async function sendPasswordResetEmail({ to, token, name }) {
  * Safely verifies email configuration on backend startup without exposing secrets.
  */
 export async function verifyEmailConfigOnStartup() {
-  const config = getResendConfig();
+  const gmailConfig = getGmailConfig();
+  const resendConfig = getResendConfig();
 
   console.log('[Email Config] Running from:', process.cwd());
-  console.log('[Email Config] RESEND_API_KEY configured:', !!config.apiKey);
-  console.log('[Email Config] EMAIL_FROM configured:', !!config.from);
+  console.log('[Email Config] Gmail OAuth2 configured:', gmailConfig.missing.length === 0);
+  console.log('[Email Config] RESEND_API_KEY configured:', !!resendConfig.apiKey);
+  console.log('[Email Config] EMAIL_FROM configured:', !!resendConfig.from);
 
-  if (config.missing.length > 0) {
-    console.log(`[Email Service] Resend verification: SKIPPED (${config.missing.join(', ')} missing)`);
-    return false;
+  if (gmailConfig.missing.length === 0) {
+    console.log('[Email Service] Gmail API configured as primary provider.');
+  } else {
+    console.log(`[Email Service] Gmail API unavailable (${gmailConfig.missing.join(', ')} missing); Resend may be used as fallback.`);
   }
 
-  console.log('[Email Service] Resend configuration verified: SUCCESS');
-  return true;
+  if (resendConfig.missing.length === 0) {
+    console.log('[Email Service] Resend configured as fallback provider.');
+  } else {
+    console.log(`[Email Service] Resend fallback unavailable (${resendConfig.missing.join(', ')} missing).`);
+  }
+
+  return gmailConfig.missing.length === 0 || resendConfig.missing.length === 0;
 }

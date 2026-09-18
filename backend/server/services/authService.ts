@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { google } from "googleapis";
 import { Resend } from "resend";
 import { config } from "../config/env";
 import { prisma } from "../prisma/client";
@@ -61,6 +62,20 @@ export function buildPublicUser(user: AuthUser | { passwordHash?: string; passwo
   return rest as PublicUser;
 }
 
+function createGmailRawMessage({ to, from, subject, text }: { to: string; from: string; subject: string; text: string }) {
+  const message = [
+    `From: ${from}`,
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    "MIME-Version: 1.0",
+    "Content-Type: text/plain; charset=\"UTF-8\"",
+    "Content-Transfer-Encoding: 8bit",
+    "",
+    text,
+  ].join("\r\n");
+  return Buffer.from(message).toString("base64url");
+}
+
 async function sendPasswordResetEmail({ to, token, name }: { to: string; token: string; name?: string }) {
   const appBaseUrl =
     process.env.APP_BASE_URL ??
@@ -71,42 +86,64 @@ async function sendPasswordResetEmail({ to, token, name }: { to: string; token: 
   const resetUrl = `${String(appBaseUrl).replace(/\/$/, "")}/reset-password?token=${encodeURIComponent(token)}`;
   const firstName = name?.trim().split(/\s+/)[0] ?? "User";
 
+  const gmailClientId = process.env.GMAIL_CLIENT_ID?.trim();
+  const gmailClientSecret = process.env.GMAIL_CLIENT_SECRET?.trim();
+  const gmailRedirectUri = process.env.GMAIL_REDIRECT_URI?.trim();
+  const gmailRefreshToken = process.env.GMAIL_REFRESH_TOKEN?.trim();
+  const gmailUserEmail = process.env.GMAIL_USER_EMAIL?.trim();
   const resendApiKey = process.env.RESEND_API_KEY?.trim();
   const emailFrom = process.env.EMAIL_FROM?.trim();
-
-  if (!resendApiKey || !emailFrom) {
-    console.warn("[Auth Service] Resend configuration missing; skip sending reset email.");
-    return { success: false, resetUrl, error: "Resend configuration missing." };
-  }
+  const subject = "Reset your InnKeeper password";
+  const text = [
+    `Hello ${firstName},`,
+    "",
+    "We received a request to reset your InnKeeper account password.",
+    "",
+    "Use the following link to reset your password:",
+    resetUrl,
+    "",
+    "This password reset link expires after 30 minutes.",
+    "",
+    "If you did not request a reset, you can ignore this email.",
+    "",
+    "Thanks,",
+    "The InnKeeper Team",
+  ].join("\n");
 
   try {
+    if (gmailClientId && gmailClientSecret && gmailRedirectUri && gmailRefreshToken && gmailUserEmail) {
+      const oauth2Client = new google.auth.OAuth2(gmailClientId, gmailClientSecret, gmailRedirectUri);
+      oauth2Client.setCredentials({ refresh_token: gmailRefreshToken });
+      const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+      const response = await gmail.users.messages.send({
+        userId: "me",
+        requestBody: { raw: createGmailRawMessage({ to, from: gmailUserEmail, subject, text }) },
+      });
+      if (!response.data?.id) throw new Error("Gmail API returned no message ID.");
+      return { success: true, messageId: response.data.id, resetUrl };
+    }
+
+    if (!resendApiKey || !emailFrom) {
+      return { success: false, resetUrl, error: "Gmail and Resend email configuration are missing." };
+    }
+
     const resend = new Resend(resendApiKey);
-    const { data, error } = await resend.emails.send({
-      from: emailFrom,
-      to,
-      subject: "Reset your InnKeeper password",
-      text: [
-        `Hello ${firstName},`,
-        "",
-        "We received a request to reset your InnKeeper account password.",
-        "",
-        "Use the following link to reset your password:",
-        resetUrl,
-        "",
-        "This password reset link expires after 30 minutes.",
-        "",
-        "If you did not request a reset, you can ignore this email.",
-        "",
-        "Thanks,",
-        "The InnKeeper Team",
-      ].join("\n"),
-    });
-
+    const { data, error } = await resend.emails.send({ from: emailFrom, to, subject, text });
     if (error) throw new Error(error.message || "Resend email delivery failed.");
-
     return { success: true, messageId: data?.id, resetUrl };
   } catch (error: any) {
-    console.error("[Auth Service] Failed to send password reset email:", error?.message || error);
+    if (resendApiKey && emailFrom) {
+      try {
+        const resend = new Resend(resendApiKey);
+        const { data, error: fallbackError } = await resend.emails.send({ from: emailFrom, to, subject, text });
+        if (!fallbackError) return { success: true, messageId: data?.id, resetUrl };
+        throw new Error(fallbackError.message || "Resend email delivery failed.");
+      } catch (error: any) {
+        console.error("[Auth Service] Gmail and Resend password reset delivery failed:", error?.message || error);
+        return { success: false, resetUrl, error: error?.message || "Failed to send reset email." };
+      }
+    }
+    console.error("[Auth Service] Gmail password reset delivery failed:", error?.message || error);
     return { success: false, resetUrl, error: error?.message || "Failed to send reset email." };
   }
 }

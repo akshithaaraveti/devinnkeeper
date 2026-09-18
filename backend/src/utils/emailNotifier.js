@@ -1,5 +1,5 @@
 import { createCheckInAccessToken } from './checkinAccess.js';
-import { sendEmailWithResend, verifyEmailConfigOnStartup } from './email.js';
+import { sendEmailWithGmailOrResend, verifyEmailConfigOnStartup } from './email.js';
 
 function maskEmail(email) {
   const [local, domain] = String(email || '').split('@');
@@ -16,12 +16,12 @@ function classifyEmailError(error) {
 
 export async function verifyEmailTransport() {
   if (!(await verifyEmailConfigOnStartup())) {
-    const error = 'Resend configuration is missing.';
-    console.error(`[CHECK-IN EMAIL] Resend verification failed: category=configuration error=${error}`);
+    const error = 'No email provider is configured.';
+    console.error(`[CHECK-IN EMAIL] Email provider verification failed: category=configuration error=${error}`);
     return { success: false, error, category: 'configuration' };
   }
 
-  console.log('[CHECK-IN EMAIL] Resend configuration verified successfully.');
+  console.log('[CHECK-IN EMAIL] Gmail API/Resend email configuration verified successfully.');
   return { success: true };
 }
 
@@ -45,7 +45,7 @@ export async function sendCheckInEmail({ guestEmail, guestName, guestId, reserva
     });
     const checkInUrl = `${appBaseUrl.replace(/\/$/, '')}/checkin?resId=${reservationId}&token=${encodeURIComponent(checkInToken)}`;
 
-    const mailInfo = await sendEmailWithResend({
+    const mailInfo = await sendEmailWithGmailOrResend({
           to: normalizedEmail,
           subject: `Complete Your Express Room Check-In (Reservation #${reservationId})`,
           html: `
@@ -90,7 +90,7 @@ export async function sendPasswordResetEmail({ toEmail, resetToken }) {
 
     console.log(`[Auth] Attempting to send password reset email to ${maskEmail(toEmail)}`);
 
-    const mailInfo = await sendEmailWithResend({
+    const mailInfo = await sendEmailWithGmailOrResend({
       to: toEmail,
       subject: 'Reset Your InnKeeper Account Password',
       html: `

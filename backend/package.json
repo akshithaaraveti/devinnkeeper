@@ -21,6 +21,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.1",
     "express": "^4.21.1",
+    "googleapis": "^181.0.0",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.22.0",
     "razorpay": "^2.9.8",
